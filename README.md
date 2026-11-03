@@ -11,7 +11,6 @@
 - [安卓安装、配置及编译说明](android/README.md)
 - [验证记录与待真机检查项目](android/VALIDATION.md)
 - [第三方许可](android/THIRD_PARTY_NOTICES.md)
-- [保留的原 Ubuntu 客户端说明](README-upstream.md)
 
 ## 已实现
 
@@ -24,17 +23,11 @@
 
 ## 目录结构
 
-仓库根目录保留了原 Ubuntu 客户端及其评测工具；Android 应用的开发、构建入口是 `android/`。
+本仓库仅保留 Android 客户端。应用的开发、构建入口是 `android/`，根目录的 `LICENSE` 保留原项目的 MIT 许可声明。
 
 | 子目录 | 功能 |
 | --- | --- |
 | [`android/`](android/) | 原生安卓工程，包含应用源码、离线唤醒模型、界面资源、单元测试和 Gradle 构建配置。适配 ThinkSmart View 的 Android 8.1。 |
-| [`deploy/`](deploy/) | 原 Ubuntu 客户端的部署配置，包含 systemd 服务文件；不用于安装 Android APK。 |
-| [`eval/`](eval/) | 原客户端的评测工具：`wake/` 评估唤醒率、误唤醒和回声影响；`latency/` 分析语音识别与对话链路延迟；`model-switch/` 测量模型切换。主要供开发和调试使用。 |
-| [`models/`](models/) | 原客户端使用的离线唤醒词模型，`kws-zh/` 包含中文模型和词表。安卓端打包的模型另存于 `android/app/src/main/assets/kws-zh/`。 |
-| [`tests/`](tests/) | 原 Python 客户端的回归测试及设备测试脚本，覆盖连接、播放、打断、聊天记录、熄屏等；安卓单元测试位于 `android/app/src/test/`。 |
-| [`thinksmart_client/`](thinksmart_client/) | 保留的 Ubuntu/Python 客户端实现，包括对话状态机、小智网关协议、音频、唤醒词、设备控制和 MCP 工具。不是安卓应用的运行入口。 |
-| [`web/`](web/) | 原 Ubuntu 客户端的网页界面及图标、提示音等资源；`v2/` 是原版正式界面，`test/` 是界面/GPU 调试页面。Android 版使用原生界面。 |
 
 ### Android 工程内部
 
@@ -66,4 +59,4 @@ cd android
 
 ## 来源与许可
 
-移植自 [justhalfbit/xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)，基线提交 `0e97cc11738ad38c0b21ec2db6cdb39d2c75795e`。原项目为 MIT，离线模型和其他依赖遵循各自许可。原 Python 与网页源码保留在仓库中；安卓实现位于 `android/`。
+移植自 [justhalfbit/xiaozhi-thinksmart-client](https://github.com/justhalfbit/xiaozhi-thinksmart-client)，基线提交 `0e97cc11738ad38c0b21ec2db6cdb39d2c75795e`。原项目为 MIT，离线模型和其他依赖遵循各自许可。本仓库只维护 `android/` 中的安卓实现；原 Ubuntu/Python 客户端、网页界面和 Linux 部署/评测脚本请查看上游仓库。

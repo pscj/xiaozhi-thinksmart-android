@@ -2,7 +2,7 @@
 
 以 Lenovo ThinkSmart View / Android 8.1 为目标的原生安卓客户端，无需 root、无需 Google 服务。源项目：https://github.com/justhalfbit/xiaozhi-thinksmart-client
 
-移植基线：`0e97cc11738ad38c0b21ec2db6cdb39d2c75795e`。保留仓库原 Python 版本，Android 工程位于 `android/`。
+移植基线：`0e97cc11738ad38c0b21ec2db6cdb39d2c75795e`。本仓库仅保留 Android 实现，工程位于 `android/`；原 Ubuntu/Python 版本请查看上游仓库。
 
 ## 安装和首次配置
 
