@@ -971,7 +971,12 @@ class CeltCommon {
                 /* Perform down-sampling */
                 {
                     for (j = 0; j < Nd; j++) {
-                        pcm[y + (j * C)] = Inlines.SIG2WORD16(scratch[j * downsample]);
+                        int sample = Inlines.SIG2WORD16(scratch[j * downsample]);
+                        // Hybrid decoding already placed SILK speech in pcm. Preserve it
+                        // when adding the downsampled CELT band, just as at 48 kHz.
+                        pcm[y + (j * C)] = accum != 0
+                                ? Inlines.SAT16(Inlines.ADD32(pcm[y + (j * C)], sample))
+                                : (short) sample;
                     }
                 }
             }

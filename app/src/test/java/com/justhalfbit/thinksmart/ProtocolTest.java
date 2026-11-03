@@ -59,4 +59,22 @@ public class ProtocolTest {
     }
     assertTrue("Decoded speech must have nonzero energy", energy > 1e10);
   }
+  @Test
+  public void decodesServerSizedFramesAtEveryOutputRate() throws Exception {
+    // Server replies commonly use 60 ms packets, unlike the 20 ms microphone frames.
+    for (int rate : new int[] {8000, 12000, 16000, 24000, 48000}) {
+      OpusEncoder encoder = new OpusEncoder(rate, 1, OpusApplication.OPUS_APPLICATION_AUDIO);
+      OpusDecoder decoder = new OpusDecoder(rate, 1);
+      short[] input = new short[rate * 60 / 1000];
+      short[] output = new short[rate * 120 / 1000];
+      byte[] packet = new byte[4000];
+      for (int frame = 0; frame < 8; frame++) {
+        for (int i = 0; i < input.length; i++)
+          input[i] = (short) (10000 * Math.sin(2 * Math.PI * 440 * i / rate));
+        int bytes = encoder.encode(input, 0, input.length, packet, 0, packet.length);
+        assertEquals(input.length, decoder.decode(packet, 0, bytes, output, 0, output.length, false));
+      }
+    }
+  }
+
 }

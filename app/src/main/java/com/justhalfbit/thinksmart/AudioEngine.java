@@ -3,6 +3,7 @@ package com.justhalfbit.thinksmart;
 import android.content.Context;
 import android.media.*;
 import android.media.audiofx.*;
+import android.util.Log;
 import java.util.Arrays;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -187,6 +188,7 @@ final class AudioEngine {
         if (p == null) continue;
         if (p.generation != generation.get()) continue;
         synchronized (trackLock) {
+          if (p.generation != generation.get()) continue;
           if (rate != outputRate || gen != p.generation) {
             if (track != null) {
               track.release();
@@ -214,38 +216,62 @@ final class AudioEngine {
                     Math.max(min, rate / 5 * 2),
                     AudioTrack.MODE_STREAM,
                     AudioManager.AUDIO_SESSION_ID_GENERATE);
+            if (track.getState() != AudioTrack.STATE_INITIALIZED)
+              throw new IllegalStateException("扬声器初始化失败");
             track.play();
           }
         }
         if (p.drained != null) {
-          long until = android.os.SystemClock.elapsedRealtime() + 5000;
+          // Streaming AudioTrack may wait for a full buffer before starting (or restarting
+          // after an underrun). Pad the tail so even a one-packet reply becomes audible.
+          long target = written;
+          if (target > 0) {
+            short[] silence = new short[track.getBufferSizeInFrames()];
+            writePcm(silence, silence.length, p.generation);
+          }
+          long remaining = Math.max(0, target - playbackPosition());
+          long until = android.os.SystemClock.elapsedRealtime() + remaining * 1000 / rate + 2000;
           while (running
               && p.generation == generation.get()
-              && playbackPosition() < written
+              && playbackPosition() < target
               && android.os.SystemClock.elapsedRealtime() < until) Thread.sleep(10);
           if (running && p.generation == generation.get()) p.drained.run();
           continue;
         }
         short[] pcm = new short[rate * 120 / 1000];
-        int n = decoder.decode(p.bytes, 0, p.bytes.length, pcm, 0, pcm.length, false);
-        for (int offset = 0; offset < n && running && p.generation == generation.get(); ) {
-          int count;
-          synchronized (trackLock) {
-            if (p.generation != generation.get()) break;
-            count = track.write(pcm, offset, Math.min(320, n - offset), AudioTrack.WRITE_BLOCKING);
-          }
-          if (count <= 0) throw new IllegalStateException("播放错误 " + count);
-          offset += count;
-          written += count;
+        try {
+          int n = decoder.decode(p.bytes, 0, p.bytes.length, pcm, 0, pcm.length, false);
+          writePcm(pcm, n, p.generation);
+        } catch (OpusException | IllegalArgumentException e) {
+          // A malformed server packet must not kill playback for all later replies.
+          Log.e("AudioEngine", "Opus packet decode failed, bytes=" + p.bytes.length, e);
+          callback.error("语音解码失败，已跳过异常音频包：" + e.getMessage());
+          decoder = new OpusDecoder(rate, 1);
         }
       }
     } catch (Exception e) {
-      if (running) callback.error("播放停止：" + e.getMessage());
+      if (running) {
+        Log.e("AudioEngine", "Playback failed", e);
+        callback.error("播放停止：" + e.getMessage());
+      }
     } finally {
       synchronized (trackLock) {
         AudioTrack t = track;
         track = null;
         if (t != null) t.release();
+      }
+    }
+  }
+
+  private void writePcm(short[] pcm, int samples, int packetGeneration) {
+    for (int offset = 0; offset < samples && running; ) {
+      synchronized (trackLock) {
+        if (packetGeneration != generation.get()) return;
+        int count = track.write(pcm, offset, Math.min(320, samples - offset),
+            AudioTrack.WRITE_BLOCKING);
+        if (count <= 0) throw new IllegalStateException("播放错误 " + count);
+        offset += count;
+        written += count;
       }
     }
   }
