@@ -22,6 +22,35 @@
 
 系统 AEC 与降噪效果取决于设备 ROM。服务器历史同步、后台任务播报、硬件按键及 Ubuntu 系统更新等差异详见安卓说明。
 
+## 目录结构
+
+仓库根目录保留了原 Ubuntu 客户端及其评测工具；Android 应用的开发、构建入口是 `android/`。
+
+| 子目录 | 功能 |
+| --- | --- |
+| [`android/`](android/) | 原生安卓工程，包含应用源码、离线唤醒模型、界面资源、单元测试和 Gradle 构建配置。适配 ThinkSmart View 的 Android 8.1。 |
+| [`deploy/`](deploy/) | 原 Ubuntu 客户端的部署配置，包含 systemd 服务文件；不用于安装 Android APK。 |
+| [`eval/`](eval/) | 原客户端的评测工具：`wake/` 评估唤醒率、误唤醒和回声影响；`latency/` 分析语音识别与对话链路延迟；`model-switch/` 测量模型切换。主要供开发和调试使用。 |
+| [`models/`](models/) | 原客户端使用的离线唤醒词模型，`kws-zh/` 包含中文模型和词表。安卓端打包的模型另存于 `android/app/src/main/assets/kws-zh/`。 |
+| [`tests/`](tests/) | 原 Python 客户端的回归测试及设备测试脚本，覆盖连接、播放、打断、聊天记录、熄屏等；安卓单元测试位于 `android/app/src/test/`。 |
+| [`thinksmart_client/`](thinksmart_client/) | 保留的 Ubuntu/Python 客户端实现，包括对话状态机、小智网关协议、音频、唤醒词、设备控制和 MCP 工具。不是安卓应用的运行入口。 |
+| [`web/`](web/) | 原 Ubuntu 客户端的网页界面及图标、提示音等资源；`v2/` 是原版正式界面，`test/` 是界面/GPU 调试页面。Android 版使用原生界面。 |
+
+### Android 工程内部
+
+| 子目录 | 功能 |
+| --- | --- |
+| [`android/app/`](android/app/) | 安卓应用模块，定义包名、支持的系统版本、架构和应用依赖。 |
+| [`android/app/src/main/java/com/justhalfbit/thinksmart/`](android/app/src/main/java/com/justhalfbit/thinksmart/) | 业务源码：`MainActivity` 提供界面与设置；`VoiceService` 管理后台服务、网关连接和对话流程；`AudioEngine` 负责录放音与 Opus 编解码；`WakeWord` 负责离线唤醒；`Mcp` 提供设备工具；`Protocol` 提供协议参数与校验。 |
+| [`android/app/src/main/java/org/concentus/`](android/app/src/main/java/org/concentus/) | 随源码提供的 Concentus Java Opus 编解码器。 |
+| [`android/app/src/main/assets/`](android/app/src/main/assets/) | 随 APK 打包的资源：`kws-zh/` 为离线唤醒模型、词表和唤醒词配置；`licenses/` 为第三方许可声明。 |
+| [`android/app/src/main/res/`](android/app/src/main/res/) | Android 资源，目前包含 `drawable/` 中的应用图标。 |
+| [`android/app/src/test/`](android/app/src/test/) | 安卓工程的 JVM 单元测试，覆盖 Opus 往返、采样率、音量边界和睡眠时间计算等。 |
+| [`android/gradle/`](android/gradle/) | Gradle Wrapper 的引导程序与版本、下载校验配置，配合 `gradlew` 使用固定构建工具版本。 |
+| [`android/third-party/`](android/third-party/) | 第三方组件的许可证文本。 |
+
+运行 `android/fetch-dependencies.sh` 后会生成 `android/app/libs/`，用于存放下载并校验的 Sherpa ONNX AAR；构建产物写入 `android/app/build/`。这两个目录中的依赖包和构建产物不提交到 Git。
+
 ## 编译
 
 需要 JDK 17、Android SDK Platform 34 和 Build Tools 34.0.0：
