@@ -1,0 +1,79 @@
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/AndroidManifest.xml:9: Warning: The attribute android:allowBackup is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute android:dataExtractionRules specifying an @xml resource which configures cloud backups and device transfers on Android 12 and higher. [DataExtractionRules]
+ <application android:icon="@drawable/ic_launcher" android:label="小麦 ThinkSmart" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+                                                                                                                                                                ~~~~~
+
+   Explanation for issues of type "DataExtractionRules":
+   Before Android 12, the attributes android:allowBackup and
+   android:fullBackupContent were used to configure all forms of backup,
+   including cloud backups, device-to-device transfers and adb backup.
+
+   In Android 12 and higher, these attributes have been deprecated and will
+   only apply to cloud backups. You should instead use the attribute
+   android:dataExtractionRules, specifying an @xml resource that configures
+   which files to back up, for cloud backups and for device-to-device
+   transfers, separately. If your minSdkVersion supports older versions,
+   you'll still want to specify an android:fullBackupContent resource if the
+   default behavior is not right for your app.
+
+   https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   https://goo.gle/DataExtractionRules
+
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/java/com/justhalfbit/thinksmart/MainActivity.java:483: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+          new RadialGradient(
+          ^
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/java/com/justhalfbit/thinksmart/MainActivity.java:487: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+              new int[] {
+              ^
+
+   Explanation for issues of type "DrawAllocation":
+   You should avoid allocating objects during a drawing or layout operation.
+   These are called frequently, so a smooth UI can be interrupted by garbage
+   collection pauses caused by the object allocations.
+
+   The way this is generally handled is to allocate the needed objects up
+   front and to reuse them for each drawing operation.
+
+   Some methods allocate memory on your behalf (such as Bitmap.create), and
+   these should be handled in the same way.
+
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/java/com/justhalfbit/thinksmart/VoiceService.java:120: Warning: Provide a timeout when requesting a wakelock with PowerManager.Wakelock.acquire(long timeout). This will ensure the OS will cleanup any wakelocks that last longer than you intend, and will save your user's battery. [WakelockTimeout]
+    wakeLock.acquire();
+    ~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "WakelockTimeout":
+   Wakelocks have two acquire methods: one with a timeout, and one without.
+   You should generally always use the one with a timeout. A typical timeout
+   is 10 minutes. If the task takes longer than it is critical that it happens
+   (i.e. can't use JobScheduler) then maybe they should consider a foreground
+   service instead (which is a stronger run guarantee and lets the user know
+   something long/important is happening).
+
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/java/com/justhalfbit/thinksmart/MainActivity.java:118: Warning: Custom view `Button` has setOnTouchListener called on it but does not override performClick [ClickableViewAccessibility]
+    ptt.setOnTouchListener(
+    ^
+
+   Explanation for issues of type "ClickableViewAccessibility":
+   If a View that overrides onTouchEvent or uses an OnTouchListener does not
+   also implement performClick and call it when clicks are detected, the View
+   may not handle accessibility actions properly. Logic handling the click
+   actions should ideally be placed in View#performClick as some accessibility
+   services invoke performClick when a click action should occur.
+
+/workspace/scratch/cc753219b6dd/xiaozhi-thinksmart-client/android/app/src/main/java/com/justhalfbit/thinksmart/MainActivity.java:465: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                        if (visible) warning.setText("管理接口不可用：" + e.getMessage());
+                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "SetTextI18n":
+   When calling TextView#setText
+   * Never call Number#toString() to format numbers; it will not handle
+   fraction separators and locale-specific digits properly. Consider using
+   String#format with proper format specifications (%d or %f) instead.
+   * Do not pass a string literal (e.g. "Hello") to display text. Hardcoded
+   text can not be properly translated to other languages. Consider using
+   Android resource strings instead.
+   * Do not build messages by concatenating text chunks. Such messages can not
+   be properly translated.
+
+   https://developer.android.com/guide/topics/resources/localization.html
+
+0 errors, 6 warnings

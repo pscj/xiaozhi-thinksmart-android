@@ -1,0 +1,16 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.justhalfbit.thinksmart'
+    compileSdk 34
+    defaultConfig { applicationId 'com.justhalfbit.thinksmart'; minSdk 26; targetSdk 34; versionCode 1; versionName '0.1.0'; ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    packaging { jniLibs { useLegacyPackaging true } }
+    androidResources { noCompress += ['onnx'] }
+    lint { abortOnError true }
+}
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:3.12.13'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.0'
+    implementation files('libs/sherpa-onnx-2.0.1.aar')
+    testImplementation 'junit:junit:4.13.2'
+}
