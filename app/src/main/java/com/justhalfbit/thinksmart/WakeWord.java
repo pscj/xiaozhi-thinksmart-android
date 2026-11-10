@@ -7,9 +7,11 @@ import com.k2fsa.sherpa.onnx.*;
 /** Owned exclusively by the recording thread, including release. */
 final class WakeWord implements AutoCloseable {
   private final KeywordSpotter spotter;
-  private final OnlineStream stream;
+  private OnlineStream stream;
+  private String phrase = "";
   private long lastHit;
   private int hang;
+  private final WakeGain gain = new WakeGain();
   private final java.util.ArrayDeque<float[]> preroll = new java.util.ArrayDeque<>();
 
   WakeWord(AssetManager assets) {
@@ -34,13 +36,21 @@ final class WakeWord implements AutoCloseable {
     stream = spotter.createStream("");
   }
 
+  void setPhrase(String phrase, String keywords) {
+    OnlineStream replacement = spotter.createStream(keywords);
+    stream.release();
+    stream = replacement;
+    this.phrase = phrase;
+    hang = 0;
+    preroll.clear();
+  }
+
   boolean feed(short[] pcm) {
-    float[] samples = new float[pcm.length];
-    for (int i = 0; i < pcm.length; i++)
-      samples[i] = Math.max(-1f, Math.min(1f, pcm[i] / 32768f * 3.1623f));
     double sum = 0;
     for (short sample : pcm) sum += (double) sample * sample;
-    if (Math.sqrt(sum / pcm.length) / 32768.0 >= 0.0031623) {
+    double rms = Math.sqrt(sum / pcm.length) / 32768.0;
+    float[] samples = gain.process(pcm, rms);
+    if (rms >= 0.0001) {
       if (hang == 0) {
         for (float[] before : preroll) stream.acceptWaveform(before, 16000);
         preroll.clear();
@@ -54,10 +64,11 @@ final class WakeWord implements AutoCloseable {
     stream.acceptWaveform(samples, 16000);
     while (spotter.isReady(stream)) {
       spotter.decode(stream);
-      if (!spotter.getResult(stream).getKeyword().isEmpty()) {
+      String hit = spotter.getResult(stream).getKeyword();
+      if (!hit.isEmpty()) {
         spotter.reset(stream);
         long now = SystemClock.elapsedRealtime();
-        if (now - lastHit > 2000) {
+        if ((phrase.isEmpty() || phrase.equals(hit)) && now - lastHit > 2000) {
           lastHit = now;
           return true;
         }

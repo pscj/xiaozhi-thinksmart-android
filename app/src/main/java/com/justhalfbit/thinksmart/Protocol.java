@@ -22,5 +22,23 @@ public final class Protocol {
     return Integer.parseInt(time.substring(0, 2)) * 60 + Integer.parseInt(time.substring(3));
   }
 
+  public static boolean isWakeText(String text) {
+    String normalized = text.replaceAll("[\\p{P}\\s]", "");
+    return normalized.contains("小麦小麦")
+        || normalized.contains("哈喽小麦")
+        || normalized.contains("小麦同学");
+  }
+
+  public static boolean idleExpired(long now, long last, int minutes, boolean active) {
+    return !active && minutes > 0 && now - last >= minutes * 60000L;
+  }
+
+  public static boolean conversationActive(String state) {
+    return "聆听中".equals(state)
+        || "识别中".equals(state)
+        || "思考中".equals(state)
+        || "回复中".equals(state);
+  }
+
   private Protocol() {}
 }

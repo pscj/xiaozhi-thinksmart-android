@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation android:name="com.justhalfbit.thinksmart.UiSnapshotRunner"
+        android:targetPackage="com.justhalfbit.thinksmart" android:label="界面对照预览"/>
+    <instrumentation android:name="com.justhalfbit.thinksmart.MainControlsRunner"
+        android:targetPackage="com.justhalfbit.thinksmart" android:label="主界面交互回归"/>
+    <instrumentation android:name="com.justhalfbit.thinksmart.MuseBleRunner"
+        android:targetPackage="com.justhalfbit.thinksmart" android:label="Muse BLE 回归"/>
+</manifest>

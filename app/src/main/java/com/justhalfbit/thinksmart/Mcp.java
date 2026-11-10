@@ -75,6 +75,7 @@ final class Mcp {
           int volume = Protocol.percent(a.getInt("volume"));
           int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
           am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(volume * max / 100f), 0);
+          service.notifyVolume(volume);
           value = VoiceService.json("success", true, "volume", volume);
         } else if (name.equals("self.audio_speaker.get_volume"))
           value =
