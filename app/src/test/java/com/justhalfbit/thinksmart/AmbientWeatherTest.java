@@ -163,13 +163,13 @@ public class AmbientWeatherTest {
     long now = 100 * HOUR;
     // Fresh cache: never fetch, however old the last attempt is.
     assertFalse(AmbientRepository.weatherFetchDue(now - HOUR, 0L, now));
-    assertFalse(AmbientRepository.weatherFetchDue(now - 11 * HOUR, now - 11 * HOUR, now));
+    assertFalse(AmbientRepository.weatherFetchDue(now - 3 * HOUR + 1, now - 3 * HOUR + 1, now));
     // Stale cache and the last attempt a full interval ago: fetch.
-    assertTrue(AmbientRepository.weatherFetchDue(now - 12 * HOUR, now - 12 * HOUR, now));
+    assertTrue(AmbientRepository.weatherFetchDue(now - 3 * HOUR, now - 3 * HOUR, now));
     assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 13 * HOUR, now));
     // No cache at all and never attempted: fetch.
     assertTrue(AmbientRepository.weatherFetchDue(0L, 0L, now));
-    // Failed requests no longer block retries for twelve hours.
+    // Failed requests no longer block retries for the whole freshness window.
     assertTrue(AmbientRepository.weatherFetchDue(0L, now - HOUR, now));
     assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 2 * HOUR, now));
   }
@@ -187,9 +187,9 @@ public class AmbientWeatherTest {
   }
 
   @Test
-  public void successfulRetryStartsTwelveHourWindowAgain() {
+  public void successfulRetryStartsThreeHourWindowAgain() {
     long succeeded = 100 * HOUR;
-    long expiry = succeeded + 12 * HOUR;
+    long expiry = succeeded + 3 * HOUR;
     assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, succeeded + 5 * 60_000L));
     assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry - 1));
     assertTrue(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry));

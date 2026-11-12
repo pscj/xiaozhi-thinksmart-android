@@ -218,7 +218,7 @@ final class AmbientView extends FrameLayout {
     LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(-2, -2);
     rangeParams.topMargin = dp(2);
     wxStack.addView(wxRange, rangeParams);
-    wxMeta = text("", 24, 0xffb6c0e2);
+    wxMeta = text("", 16, 0xffb6c0e2);
     wxMeta.setGravity(Gravity.END);
     // The meta line must stay inside the weather column: full column width, one line,
     // end-ellipsis. Wrap-content width let a long line spill left across the screen.
@@ -742,7 +742,7 @@ final class AmbientView extends FrameLayout {
     }
   }
 
-  // Repository serves successful cache for 12 hours; check often enough for failure retries.
+  // Repository serves successful cache for 3 hours; check often enough for failure retries.
   private static final long WEATHER_TTL_MS = AmbientRepository.WEATHER_RETRY_INTERVAL_MS;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;

@@ -120,7 +120,7 @@ final class AmbientRepository {
   }
 
   /**
-   * Successful cache lasts 12 hours. Without fresh cache, retry five minutes after the
+   * Successful cache lasts 3 hours. Without fresh cache, retry five minutes after the
    * previous attempt. {@code cachedAtMs} is 0 when there is no usable cache.
    */
   static boolean weatherFetchDue(long cachedAtMs, long lastAttemptMs, long nowMs) {
@@ -325,8 +325,8 @@ final class AmbientRepository {
     return new AmbientData.NewsFeed("", FALLBACK_NEWS, false);
   }
 
-  /** Successful weather readings remain fresh for 12 hours. */
-  static final long WEATHER_MIN_INTERVAL_MS = 12 * 60 * 60_000L;
+  /** Successful weather readings remain fresh for 3 hours. */
+  static final long WEATHER_MIN_INTERVAL_MS = 3 * 60 * 60_000L;
   static final long WEATHER_RETRY_INTERVAL_MS = 5 * 60_000L;
 
   private static final int MAX_NEWS_ITEMS = 6;
