@@ -19,6 +19,7 @@ import android.view.animation.ScaleAnimation;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 import java.io.File;
 import java.io.IOException;
@@ -74,6 +75,8 @@ final class AmbientView extends FrameLayout {
   private final TextView timeText, dateText, wxCity, wxTemp, wxCond, wxRange, wxMeta, newsTag,
       photoClock;
   private final View wxDivider;
+  /** Sibling ids inside the RelativeLayout headline row, for baseline/position rules. */
+  private int wxTempId, wxDividerId, wxRangeId;
   private final LinearLayout newsList;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
@@ -188,36 +191,45 @@ final class AmbientView extends FrameLayout {
     wxCity.setGravity(Gravity.END);
     right.addView(wxCity);
     // Headline row (the approved mock's composition): the live temperature huge at
-    // the left, a hairline divider, then a small stack — condition over today's
-    // range. Temperature and stack are bottom-aligned, so the number's base sits
-    // level with the range line. The city above and the detail line below stay
-    // their own rows; nothing outside this block is touched.
-    LinearLayout wxHead = new LinearLayout(context);
-    wxHead.setOrientation(LinearLayout.HORIZONTAL);
+    // the left, a hairline divider, then condition over today's range. The range
+    // is BASELINE-aligned to the temperature (RelativeLayout rules), not
+    // bottom-aligned: two font sizes share one text baseline, so the digits end
+    // level even though the views' own heights differ. Bottom-aligning the views
+    // left the big number's base hanging below the range on the real device.
+    // The city above and the detail line below stay their own rows; nothing
+    // outside this block is touched.
+    RelativeLayout wxHead = new RelativeLayout(context);
     right.addView(wxHead, new LinearLayout.LayoutParams(-2, -2));
     wxTemp = text("", 80, 0xfff2f5ff);
     wxTemp.setTypeface(null, Typeface.BOLD);
-    LinearLayout.LayoutParams tempParams = new LinearLayout.LayoutParams(-2, -2);
-    tempParams.gravity = Gravity.BOTTOM;
+    wxTempId = View.generateViewId();
+    wxTemp.setId(wxTempId);
+    RelativeLayout.LayoutParams tempParams = new RelativeLayout.LayoutParams(-2, -2);
+    tempParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
     wxHead.addView(wxTemp, tempParams);
     wxDivider = new View(context);
     wxDivider.setBackgroundColor(0x59ffffff);
-    LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(dp(1), dp(64));
+    wxDividerId = View.generateViewId();
+    wxDivider.setId(wxDividerId);
+    RelativeLayout.LayoutParams dividerParams = new RelativeLayout.LayoutParams(dp(1), dp(64));
     dividerParams.leftMargin = dp(10);
     dividerParams.rightMargin = dp(10);
-    dividerParams.gravity = Gravity.BOTTOM;
+    dividerParams.addRule(RelativeLayout.RIGHT_OF, wxTempId);
+    dividerParams.addRule(RelativeLayout.ALIGN_BOTTOM, wxTempId);
     wxHead.addView(wxDivider, dividerParams);
-    LinearLayout wxStack = new LinearLayout(context);
-    wxStack.setOrientation(LinearLayout.VERTICAL);
-    LinearLayout.LayoutParams stackParams = new LinearLayout.LayoutParams(-2, -2);
-    stackParams.gravity = Gravity.BOTTOM;
-    wxHead.addView(wxStack, stackParams);
-    wxCond = text("", 30, 0xfff2f5ff);
-    wxStack.addView(wxCond);
     wxRange = text("", 26, 0xffb6c0e2);
-    LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(-2, -2);
-    rangeParams.topMargin = dp(2);
-    wxStack.addView(wxRange, rangeParams);
+    wxRangeId = View.generateViewId();
+    wxRange.setId(wxRangeId);
+    RelativeLayout.LayoutParams rangeParams = new RelativeLayout.LayoutParams(-2, -2);
+    rangeParams.addRule(RelativeLayout.RIGHT_OF, wxDividerId);
+    rangeParams.addRule(RelativeLayout.ALIGN_BASELINE, wxTempId);
+    wxHead.addView(wxRange, rangeParams);
+    wxCond = text("", 30, 0xfff2f5ff);
+    RelativeLayout.LayoutParams condParams = new RelativeLayout.LayoutParams(-2, -2);
+    condParams.addRule(RelativeLayout.ABOVE, wxRangeId);
+    condParams.addRule(RelativeLayout.ALIGN_LEFT, wxRangeId);
+    condParams.bottomMargin = dp(2);
+    wxHead.addView(wxCond, condParams);
     wxMeta = text("", 16, 0xffb6c0e2);
     wxMeta.setGravity(Gravity.END);
     // The meta line must stay inside the weather column: full column width, one line,
@@ -559,6 +571,7 @@ final class AmbientView extends FrameLayout {
     wxTemp.setVisibility(hasTemp ? VISIBLE : GONE);
     wxTemp.setText(hasTemp ? wx.currentTemp + "°" : "");
     wxDivider.setVisibility(hasTemp ? VISIBLE : GONE);
+    anchorRangeLine(hasTemp);
     wxCond.setText(wx.condition);
     wxRange.setText(wx.lowTemp + "° ~ " + wx.highTemp + "°");
     // The hub payload has no AQI, so none is shown. The meta line is only a short slice
@@ -590,9 +603,34 @@ final class AmbientView extends FrameLayout {
     wxTemp.setVisibility(GONE);
     wxTemp.setText("");
     wxDivider.setVisibility(GONE);
+    anchorRangeLine(false);
     wxCond.setText("天气暂不可用");
     wxRange.setText("");
     wxMeta.setText("");
+  }
+
+  /**
+   * Re-anchors the range line inside the headline row. With a live temperature the
+   * range hangs right of the divider and shares the temperature's text baseline, so
+   * the digits of both sizes end level. Without one, the temperature and the
+   * divider are GONE — a baseline rule against a gone sibling resolves
+   * unpredictably, so the range anchors to the parent instead (left edge, bottom)
+   * and the condition stays above it: the lone stack keeps its shape.
+   */
+  private void anchorRangeLine(boolean withTemp) {
+    RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) wxRange.getLayoutParams();
+    if (withTemp) {
+      lp.removeRule(RelativeLayout.ALIGN_PARENT_LEFT);
+      lp.removeRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+      lp.addRule(RelativeLayout.RIGHT_OF, wxDividerId);
+      lp.addRule(RelativeLayout.ALIGN_BASELINE, wxTempId);
+    } else {
+      lp.removeRule(RelativeLayout.RIGHT_OF);
+      lp.removeRule(RelativeLayout.ALIGN_BASELINE);
+      lp.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+      lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+    }
+    wxRange.setLayoutParams(lp);
   }
 
   private void renderNews(AmbientData.NewsFeed feed) {
