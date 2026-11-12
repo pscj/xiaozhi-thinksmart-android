@@ -7,7 +7,11 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.view.animation.Animation;
@@ -231,17 +235,8 @@ final class AmbientView extends FrameLayout {
     addView(
         wakeBar,
         new FrameLayout.LayoutParams(-1, dp(WAKE_BAR_H), Gravity.BOTTOM));
-    View dot = new View(context);
-    GradientDrawable dotBg = new GradientDrawable();
-    dotBg.setShape(GradientDrawable.OVAL);
-    dotBg.setColor(0xff43d39e);
-    dot.setBackground(dotBg);
-    wakeBar.addView(dot, new LinearLayout.LayoutParams(dp(9), dp(9)));
-    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffffd68a);
-    wakeText.setTypeface(null, Typeface.BOLD);
-    LinearLayout.LayoutParams wakeTextParams = new LinearLayout.LayoutParams(-2, -2);
-    wakeTextParams.leftMargin = dp(10);
-    wakeBar.addView(wakeText, wakeTextParams);
+    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
+    wakeBar.addView(wakeText, new LinearLayout.LayoutParams(-2, -2));
 
     // ---- photo layer ----
     photoLayer = new FrameLayout(context);
@@ -299,7 +294,17 @@ final class AmbientView extends FrameLayout {
   private void refreshWakeText() {
     String phrase = wakePhrase == null ? null : wakePhrase.get();
     if (phrase == null || phrase.trim().isEmpty()) phrase = "小麦小麦";
-    wakeText.setText("喊「" + phrase.trim() + "」随时唤醒我");
+    phrase = phrase.trim();
+    // Only the wake phrase itself stands out (amber and bold); the rest of the hint keeps
+    // the bar's plain colour and weight.
+    String full = "喊「" + phrase + "」随时唤醒我";
+    SpannableString span = new SpannableString(full);
+    int start = full.indexOf(phrase);
+    int end = start + phrase.length();
+    span.setSpan(
+        new ForegroundColorSpan(0xffffd68a), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    span.setSpan(new StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    wakeText.setText(span);
   }
 
   boolean isShowing() {
