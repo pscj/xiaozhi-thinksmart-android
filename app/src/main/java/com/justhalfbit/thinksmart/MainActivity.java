@@ -57,7 +57,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private Runnable hideVolumeHud;
   private OrbView orb;
   private BackdropView backdrop;
+  private AmbientView ambient;
+  private boolean ambientPhotoRequested;
   private EditText input;
+  private static final long AMBIENT_IDLE_MS = 60_000L;
+  private static final long AMBIENT_PHOTO_MS = 120_000L;
   private String rendered = "";
   private Boolean lastConversationStyle, lastAbortStyle;
   private int lastModelLogo = -1;
@@ -83,14 +87,39 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           updateClock();
           applyBrightness();
           long now = SystemClock.elapsedRealtime();
+          // While the ambient screen is up it counts as the screen being
+          // intentionally on: the idle black-out waits until it goes away.
+          boolean ambientUp = ambient != null && ambient.isShowing();
           if (Protocol.idleExpired(
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
-              active || overlayOpen)) setBlack(true);
+              active || overlayOpen || ambientUp)) setBlack(true);
+          updateAmbient(now);
           ui.postDelayed(this, 1000);
         }
       };
+
+  /**
+   * Ambient standby screen timing: 60 s without a conversation or touch shows the info screen,
+   * another 60 s asks it for photo mode. Anything that counts as interaction (touch() moving
+   * lastInteraction, a conversation going active, an overlay, the black curtain) hides it.
+   */
+  private void updateAmbient(long now) {
+    if (ambient == null) return;
+    long idleMs = now - lastInteraction;
+    if (!active && !overlayOpen && !black && idleMs >= AMBIENT_IDLE_MS) {
+      if (!ambient.isShowing()) {
+        ambient.show();
+        ambientPhotoRequested = false;
+      } else if (!ambientPhotoRequested && idleMs >= AMBIENT_PHOTO_MS) {
+        ambientPhotoRequested = true;
+        ambient.enterPhotoMode();
+      }
+    } else if (ambient.isShowing()) {
+      ambient.hide();
+    }
+  }
 
   @Override
   public void onCreate(Bundle state) {
@@ -572,6 +601,14 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
     warningParams.topMargin = dp(70);
     frame.addView(warning, warningParams);
+    ambient = new AmbientView(this);
+    java.io.File externalFiles = getExternalFilesDir(null);
+    java.io.File photosDir =
+        new java.io.File(externalFiles != null ? externalFiles : getFilesDir(), "photos");
+    ambient.bind(new AmbientRepository(this, () -> prefs.getString("http", "")), photosDir);
+    ambientPhotoRequested = false;
+    // Below the black curtain: the curtain still wins when the screen blanks.
+    frame.addView(ambient, new FrameLayout.LayoutParams(-1, -1));
     curtain = new View(this);
     curtain.setBackgroundColor(Color.BLACK);
     curtain.setContentDescription("触摸恢复屏幕");
@@ -1014,12 +1051,14 @@ public class MainActivity extends Activity implements VoiceService.Listener {
 
   private void touch() {
     lastInteraction = SystemClock.elapsedRealtime();
+    if (ambient != null && ambient.isShowing()) ambient.hide();
     if (black) setBlack(false);
   }
 
   private void setBlack(boolean value) {
     if (black == value) return;
     black = value;
+    if (value && ambient != null && ambient.isShowing()) ambient.hide();
     curtain.setVisibility(value ? View.VISIBLE : View.GONE);
     orb.setVisibility(value ? View.INVISIBLE : View.VISIBLE);
     applyBrightness();
@@ -1138,6 +1177,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   @Override
   protected void onStop() {
     cancelHold();
+    if (ambient != null) ambient.hide();
     visible = false;
     ui.removeCallbacks(tick);
     if (service != null) service.detach();
