@@ -12,12 +12,17 @@ final class AmbientData {
   static final class WeatherNow {
     /** Location name as the hub reported it (location.name), "" when absent. Never invented. */
     final String city;
-    /** Today's condition wording, e.g. 晴 / 多云 / 小雨 (forecast text, or the summary's head). */
+    /**
+     * Condition wording, e.g. 晴 / 多云 / 小雨 — the hub's current condition when it sends
+     * one, else today's forecast text, else the summary's head.
+     */
     final String condition;
     /** Current-conditions detail text from the hub, "" when absent. Display truncates it. */
     final String detail;
     final int lowTemp;
     final int highTemp;
+    /** Current temperature (current.temp), null when the hub did not send one. Never invented. */
+    final Integer currentTemp;
     /** Weather provider name as reported (source, e.g. 和风天气), "" when absent. */
     final String source;
     /** When this reading was fetched from the hub, epoch ms (client clock). */
@@ -31,6 +36,7 @@ final class AmbientData {
         String detail,
         int lowTemp,
         int highTemp,
+        Integer currentTemp,
         String source,
         long fetchedAtMs,
         boolean fromCache) {
@@ -39,6 +45,7 @@ final class AmbientData {
       this.detail = detail;
       this.lowTemp = lowTemp;
       this.highTemp = highTemp;
+      this.currentTemp = currentTemp;
       this.source = source;
       this.fetchedAtMs = fetchedAtMs;
       this.fromCache = fromCache;

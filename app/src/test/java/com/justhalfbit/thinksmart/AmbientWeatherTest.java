@@ -49,6 +49,8 @@ public class AmbientWeatherTest {
     assertFalse(now.detail.contains(":"));
     assertEquals(2, now.lowTemp);
     assertEquals(11, now.highTemp);
+    // No current.temp in this payload: stays null, the headline keeps its plain form.
+    assertNull(now.currentTemp);
     assertEquals("和风天气", now.source);
     assertEquals(123_000L, now.fetchedAtMs);
     assertFalse(now.fromCache);
@@ -97,6 +99,35 @@ public class AmbientWeatherTest {
     assertEquals("", now.city);
     assertEquals("", now.source);
     assertTrue(now.fromCache);
+  }
+
+  @Test
+  public void parsesCurrentTempAndCondition() throws Exception {
+    String forecast = "\"forecast\": [{\"text\": \"晴\", \"temp_max\": 15, \"temp_min\": 1}]";
+    // String form, as the hub's parser may emit: the live condition wins over the
+    // forecast wording, and the temperature is read as a plain number.
+    AmbientData.WeatherNow stringForm =
+        AmbientRepository.parseKioskWeather(
+            weather("{\"current\": {\"temp\": \"10\", \"condition\": \"霾\"}," + forecast + "}"),
+            0L,
+            false);
+    assertNotNull(stringForm);
+    assertEquals(Integer.valueOf(10), stringForm.currentTemp);
+    assertEquals("霾", stringForm.condition);
+    // Numeric form with a degree suffix and a negative value parses the same way.
+    AmbientData.WeatherNow numericForm =
+        AmbientRepository.parseKioskWeather(
+            weather("{\"current\": {\"temp\": \"-3°\"}," + forecast + "}"), 0L, false);
+    assertNotNull(numericForm);
+    assertEquals(Integer.valueOf(-3), numericForm.currentTemp);
+    // No live condition: today's forecast text still stands, as before.
+    assertEquals("晴", numericForm.condition);
+    // An unparseable temp is simply absent, never a reason to reject the reading.
+    AmbientData.WeatherNow badTemp =
+        AmbientRepository.parseKioskWeather(
+            weather("{\"current\": {\"temp\": \"暂无\"}," + forecast + "}"), 0L, false);
+    assertNotNull(badTemp);
+    assertNull(badTemp.currentTemp);
   }
 
   @Test

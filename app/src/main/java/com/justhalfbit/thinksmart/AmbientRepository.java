@@ -24,8 +24,10 @@ import org.json.JSONObject;
  * <p>Weather: GET {hub}/kiosk/weather (no parameters), served by xiaozhi-hub-server from its
  * configured weather plugin. The response is
  * {@code {"ok": true, "weather": {"location": {"name": …}, "current": {"summary": …,
- * "details": {…}}, "forecast": [{"text": …, "temp_max": …, "temp_min": …}, …],
- * "source": …}}} — note {@code current.details} is an object of label→value pairs
+ * "details": {…}, "temp": …, "condition": …}, "forecast": [{"text": …, "temp_max": …,
+ * "temp_min": …}, …], "source": …}}} — {@code current.temp} (the live temperature) and
+ * {@code current.condition} (the live condition wording) are optional and used only when
+ * present. Note {@code current.details} is an object of label→value pairs
  * (wind, humidity, …), not a string; {@link #formatDetails} flattens it for display.
  * the hub decides the city, the client never hardcodes one. The endpoint is rate-limited, so
  * successful readings are refreshed after {@link #WEATHER_MIN_INTERVAL_MS}: the last good
@@ -146,13 +148,20 @@ final class AmbientRepository {
     JSONObject current = weather.optJSONObject("current");
     String summary = current == null ? "" : current.optString("summary").trim();
     String detail = current == null ? "" : formatDetails(current.opt("details"));
+    // The hub's live condition (current.condition) describes what it is like right now and
+    // beats today's forecast wording; without it the forecast text, then the summary head,
+    // stand in as before. current.temp is optional in the same way — absent stays null and
+    // the screen falls back to the plain headline.
+    String currentCondition = current == null ? "" : current.optString("condition").trim();
+    if (!currentCondition.isEmpty()) condition = currentCondition;
+    Integer currentTemp = optTemp(current, "temp");
     if (condition.isEmpty()) condition = summaryHead(summary);
     if (condition.isEmpty()) return null;
     JSONObject location = weather.optJSONObject("location");
     String city = location == null ? "" : location.optString("name").trim();
     String source = weather.optString("source").trim();
     return new AmbientData.WeatherNow(
-        city, condition, detail, low, high, source, fetchedAtMs, fromCache);
+        city, condition, detail, low, high, currentTemp, source, fetchedAtMs, fromCache);
   }
 
   /**
@@ -246,7 +255,7 @@ final class AmbientRepository {
     return head;
   }
 
-  /** temp_max/temp_min arrive as numbers or numeric strings depending on the hub's parser. */
+  /** Temperatures (temp_max/temp_min, current.temp) arrive as numbers or numeric strings. */
   private static Integer optTemp(JSONObject obj, String key) {
     if (obj == null || obj.isNull(key)) return null;
     Object value = obj.opt(key);

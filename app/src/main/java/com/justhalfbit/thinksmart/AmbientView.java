@@ -71,7 +71,9 @@ final class AmbientView extends FrameLayout {
   private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxCity, wxMain, wxMeta, newsTag, photoClock;
+  private final TextView timeText, dateText, wxCity, wxTemp, wxCond, wxRange, wxMeta, newsTag,
+      photoClock;
+  private final View wxDivider;
   private final LinearLayout newsList;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
@@ -185,17 +187,45 @@ final class AmbientView extends FrameLayout {
     wxCity = text("", 20, 0xffb6c0e2);
     wxCity.setGravity(Gravity.END);
     right.addView(wxCity);
-    wxMain = text("", 44, 0xfff2f5ff);
-    wxMain.setGravity(Gravity.END);
-    right.addView(wxMain);
-    wxMeta = text("", 16, 0xffb6c0e2);
+    // Headline row (the approved mock's composition): the live temperature huge at
+    // the left, a hairline divider, then a small stack — condition over today's
+    // range. Temperature and stack are bottom-aligned, so the number's base sits
+    // level with the range line. The city above and the detail line below stay
+    // their own rows; nothing outside this block is touched.
+    LinearLayout wxHead = new LinearLayout(context);
+    wxHead.setOrientation(LinearLayout.HORIZONTAL);
+    right.addView(wxHead, new LinearLayout.LayoutParams(-2, -2));
+    wxTemp = text("", 80, 0xfff2f5ff);
+    wxTemp.setTypeface(null, Typeface.BOLD);
+    LinearLayout.LayoutParams tempParams = new LinearLayout.LayoutParams(-2, -2);
+    tempParams.gravity = Gravity.BOTTOM;
+    wxHead.addView(wxTemp, tempParams);
+    wxDivider = new View(context);
+    wxDivider.setBackgroundColor(0x59ffffff);
+    LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(dp(1), dp(64));
+    dividerParams.leftMargin = dp(10);
+    dividerParams.rightMargin = dp(10);
+    dividerParams.gravity = Gravity.BOTTOM;
+    wxHead.addView(wxDivider, dividerParams);
+    LinearLayout wxStack = new LinearLayout(context);
+    wxStack.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout.LayoutParams stackParams = new LinearLayout.LayoutParams(-2, -2);
+    stackParams.gravity = Gravity.BOTTOM;
+    wxHead.addView(wxStack, stackParams);
+    wxCond = text("", 30, 0xfff2f5ff);
+    wxStack.addView(wxCond);
+    wxRange = text("", 26, 0xffb6c0e2);
+    LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(-2, -2);
+    rangeParams.topMargin = dp(2);
+    wxStack.addView(wxRange, rangeParams);
+    wxMeta = text("", 24, 0xffb6c0e2);
     wxMeta.setGravity(Gravity.END);
     // The meta line must stay inside the weather column: full column width, one line,
     // end-ellipsis. Wrap-content width let a long line spill left across the screen.
     wxMeta.setMaxLines(1);
     wxMeta.setEllipsize(TextUtils.TruncateAt.END);
     LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(-1, -2);
-    metaParams.topMargin = dp(6);
+    metaParams.topMargin = dp(14);
     right.addView(wxMeta, metaParams);
 
     // ---- news ----
@@ -522,9 +552,15 @@ final class AmbientView extends FrameLayout {
     // The city name is whatever the hub reported for this reading — never a local constant.
     wxCity.setVisibility(wx.city.isEmpty() ? GONE : VISIBLE);
     wxCity.setText(wx.city);
-    // Condition and today's range share one big line, e.g. 晴 1° ~ 15° (the user asked
-    // for them together, same headline size and colour — no separate range line).
-    wxMain.setText(wx.condition + " " + wx.lowTemp + "° ~ " + wx.highTemp + "°");
+    // Headline row: with a live temperature, the big number and the divider show and
+    // the stack carries condition over today's range (10° | 霾 / 1° ~ 15°). Without
+    // one, only the stack shows — no empty number, no divider.
+    boolean hasTemp = wx.currentTemp != null;
+    wxTemp.setVisibility(hasTemp ? VISIBLE : GONE);
+    wxTemp.setText(hasTemp ? wx.currentTemp + "°" : "");
+    wxDivider.setVisibility(hasTemp ? VISIBLE : GONE);
+    wxCond.setText(wx.condition);
+    wxRange.setText(wx.lowTemp + "° ~ " + wx.highTemp + "°");
     // The hub payload has no AQI, so none is shown. The meta line is only a short slice
     // of the current-conditions detail — no provider name, no fetch timestamp (the user
     // found both noisy on the real screen).
@@ -551,7 +587,11 @@ final class AmbientView extends FrameLayout {
   private void renderWeatherUnavailable() {
     wxCity.setVisibility(GONE);
     wxCity.setText("");
-    wxMain.setText("天气暂不可用");
+    wxTemp.setVisibility(GONE);
+    wxTemp.setText("");
+    wxDivider.setVisibility(GONE);
+    wxCond.setText("天气暂不可用");
+    wxRange.setText("");
     wxMeta.setText("");
   }
 
