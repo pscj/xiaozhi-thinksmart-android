@@ -12,8 +12,9 @@ import org.junit.Test;
 /**
  * Host-side tests for the hub /kiosk/weather mapping and the 12-hour fetch gate. The payload
  * shape pinned here is the one xiaozhi-hub-server's handle_kiosk_weather returns:
- * {"location": {"name": …}, "current": {"summary": …, "details": …}, "forecast":
- * [{"text": …, "temp_max": …, "temp_min": …}], "source": …}.
+ * {"location": {"name": …}, "current": {"summary": …, "details": {…}}, "forecast":
+ * [{"text": …, "temp_max": …, "temp_min": …}], "source": …}. Note details is an object
+ * of label→value pairs (the hub's page parser yields a dict), not a string.
  */
 public class AmbientWeatherTest {
 
@@ -29,7 +30,9 @@ public class AmbientWeatherTest {
         AmbientRepository.parseKioskWeather(
             weather(
                 "{\"location\": {\"id\": \"101010100\", \"name\": \"北京\"},"
-                    + "\"current\": {\"summary\": \"晴，微风\", \"details\": \"体感温度 7℃\"},"
+                    + "\"current\": {\"summary\": \"晴，微风\", \"details\":"
+                    + " {\"北风\": \"2级\", \"相对湿度\": \"62%\", \"紫外线\": \"弱\","
+                    + " \"体感温度\": \"7℃\"}},"
                     + "\"forecast\": [{\"date\": \"2026-11-12\", \"text\": \"晴\","
                     + " \"temp_max\": 11, \"temp_min\": 2}],"
                     + "\"source\": \"和风天气\", \"cached\": false}"),
@@ -38,12 +41,46 @@ public class AmbientWeatherTest {
     assertNotNull(now);
     assertEquals("北京", now.city);
     assertEquals("晴", now.condition);
-    assertEquals("体感温度 7℃", now.detail);
+    // Object details are flattened to a readable line: labels ranked (feels-like, wind,
+    // humidity, UV), wordy labels shortened, no JSON punctuation ever reaches the screen.
+    assertEquals("体感7℃ · 北风2级 · 湿度62% · 紫外线弱", now.detail);
+    assertFalse(now.detail.contains("{"));
+    assertFalse(now.detail.contains("\""));
+    assertFalse(now.detail.contains(":"));
     assertEquals(2, now.lowTemp);
     assertEquals(11, now.highTemp);
     assertEquals("和风天气", now.source);
     assertEquals(123_000L, now.fetchedAtMs);
     assertFalse(now.fromCache);
+  }
+
+  @Test
+  public void detailsStringForms() throws Exception {
+    String forecast = "\"forecast\": [{\"text\": \"晴\", \"temp_max\": 11, \"temp_min\": 2}]";
+    // A details string that itself holds a JSON object is parsed and flattened the
+    // same way as an object value — never shown raw.
+    AmbientData.WeatherNow jsonString =
+        AmbientRepository.parseKioskWeather(
+            weather(
+                "{\"current\": {\"details\": \"{\\\"北风\\\":\\\"2级\\\",\\\"相对湿度\\\":\\\"62%\\\"}\"},"
+                    + forecast
+                    + "}"),
+            0L,
+            false);
+    assertNotNull(jsonString);
+    assertEquals("北风2级 · 湿度62%", jsonString.detail);
+    // A plain-text details string is used verbatim.
+    AmbientData.WeatherNow plain =
+        AmbientRepository.parseKioskWeather(
+            weather("{\"current\": {\"details\": \"体感温度 7℃\"}," + forecast + "}"), 0L, false);
+    assertNotNull(plain);
+    assertEquals("体感温度 7℃", plain.detail);
+    // A "{" string that does not parse becomes no detail at all, not raw JSON.
+    AmbientData.WeatherNow broken =
+        AmbientRepository.parseKioskWeather(
+            weather("{\"current\": {\"details\": \"{broken\"}," + forecast + "}"), 0L, false);
+    assertNotNull(broken);
+    assertEquals("", broken.detail);
   }
 
   @Test
