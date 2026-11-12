@@ -16,6 +16,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -24,6 +26,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 
 /**
  * The ambient (standby) face: an information screen that takes over the kiosk when nothing is
@@ -42,6 +45,12 @@ import java.util.Locale;
  * <p>Photos come from a {@code photos/} folder in the app's external files dir
  * (Android/data/com.justhalfbit.thinksmart/files/photos) — put .jpg/.png/.webp files there;
  * with no photos the frame mode simply never engages.
+ *
+ * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
+ * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
+ * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — the same four
+ * scenic photos the web prototype used, rotating the same way. The photo frame mode is
+ * unaffected: it still shows its pictures full-screen at full brightness above everything.
  */
 final class AmbientView extends FrameLayout {
 
@@ -52,10 +61,15 @@ final class AmbientView extends FrameLayout {
 
   Mode mode = Mode.INFO;
 
+  private final FrameLayout bgLayer;
+  private final ImageView bgA, bgB;
+  private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
+  private final TextView timeText, dateText, wxCity, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
   private final LinearLayout newsList;
+  private final LinearLayout wakeBar;
+  private final TextView wakeText;
   private final ImageView photoA, photoB;
 
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -86,9 +100,21 @@ final class AmbientView extends FrameLayout {
           ui.postDelayed(this, PHOTO_MS);
         }
       };
+  private final Runnable bgTick =
+      new Runnable() {
+        public void run() {
+          if (!isShowing() || mode != Mode.INFO) return;
+          if (bgCount() > 1) {
+            bgIndex = (bgIndex + 1) % bgCount();
+            showBackground(bgIndex, true);
+          }
+          ui.postDelayed(this, BG_MS);
+        }
+      };
 
   private AmbientRepository repo;
   private File photosDir;
+  private Supplier<String> wakePhrase;
   private long lastWeatherFetchMs, lastNewsFetchMs;
 
   private List<File> photoFiles = new ArrayList<>();
@@ -97,15 +123,36 @@ final class AmbientView extends FrameLayout {
   private Bitmap frontBitmap;
   private int shiftStep;
 
+  // Info-screen background: the user's photos when the folder has any, else the bundled
+  // defaults (bgAssetNames holds file names inside assets/ambient_bg).
+  private List<File> bgFiles = new ArrayList<>();
+  private List<String> bgAssetNames = new ArrayList<>();
+  private int bgIndex;
+  private boolean bgFrontIsA = true;
+  private Bitmap bgFrontBitmap;
+
   AmbientView(Context context) {
     super(context);
     setBackgroundColor(0xff050813);
     setVisibility(GONE);
 
+    // ---- background layer: photo at the very bottom, dark scrim over it ----
+    bgLayer = new FrameLayout(context);
+    addView(bgLayer, new FrameLayout.LayoutParams(-1, -1));
+    bgA = photoImage(context);
+    bgB = photoImage(context);
+    bgLayer.addView(bgA, new FrameLayout.LayoutParams(-1, -1));
+    bgLayer.addView(bgB, new FrameLayout.LayoutParams(-1, -1));
+    bgScrim = new View(context);
+    bgScrim.setBackgroundColor(SCRIM_COLOR);
+    bgLayer.addView(bgScrim, new FrameLayout.LayoutParams(-1, -1));
+
     // ---- info layer ----
+    // Bottom padding reserves the wake bar's strip: the news region ends above the bar, so
+    // the last item can never slide under it.
     infoLayer = new LinearLayout(context);
     infoLayer.setOrientation(LinearLayout.VERTICAL);
-    infoLayer.setPadding(dp(48), dp(36), dp(48), 0);
+    infoLayer.setPadding(dp(48), dp(36), dp(48), dp(WAKE_BAR_H + 8));
     addView(infoLayer, new FrameLayout.LayoutParams(-1, -1));
 
     LinearLayout top = new LinearLayout(context);
@@ -128,6 +175,9 @@ final class AmbientView extends FrameLayout {
     right.setOrientation(LinearLayout.VERTICAL);
     right.setGravity(Gravity.END);
     top.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
+    wxCity = text("", 20, 0xffb6c0e2);
+    wxCity.setGravity(Gravity.END);
+    right.addView(wxCity);
     wxMain = text("", 44, 0xfff2f5ff);
     wxMain.setGravity(Gravity.END);
     right.addView(wxMain);
@@ -173,20 +223,25 @@ final class AmbientView extends FrameLayout {
     newsList.setOrientation(LinearLayout.VERTICAL);
     infoLayer.addView(newsList, new LinearLayout.LayoutParams(-1, 0, 1));
 
-    // ---- wake hint bar, pinned to the bottom of the info screen ----
-    LinearLayout wakeBar = new LinearLayout(context);
+    // ---- wake hint bar: its own full-width strip pinned to the very bottom, a sibling of
+    // the info layer (not part of its flow), with an opaque band so it reads as a bar and
+    // the news above can never run under it. The phrase follows the configured wake word;
+    // the literal here is only the pre-bind placeholder. ----
+    wakeBar = new LinearLayout(context);
     wakeBar.setOrientation(LinearLayout.HORIZONTAL);
     wakeBar.setGravity(Gravity.CENTER);
-    LinearLayout.LayoutParams wakeParams = new LinearLayout.LayoutParams(-1, -2);
-    wakeParams.bottomMargin = dp(22);
-    infoLayer.addView(wakeBar, wakeParams);
+    wakeBar.setBackgroundColor(WAKE_BAR_BG);
+    wakeBar.setVisibility(GONE);
+    addView(
+        wakeBar,
+        new FrameLayout.LayoutParams(-1, dp(WAKE_BAR_H), Gravity.BOTTOM));
     View dot = new View(context);
     GradientDrawable dotBg = new GradientDrawable();
     dotBg.setShape(GradientDrawable.OVAL);
     dotBg.setColor(0xff43d39e);
     dot.setBackground(dotBg);
     wakeBar.addView(dot, new LinearLayout.LayoutParams(dp(9), dp(9)));
-    TextView wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
+    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
     LinearLayout.LayoutParams wakeTextParams = new LinearLayout.LayoutParams(-2, -2);
     wakeTextParams.leftMargin = dp(10);
     wakeBar.addView(wakeText, wakeTextParams);
@@ -229,10 +284,21 @@ final class AmbientView extends FrameLayout {
     return view;
   }
 
-  /** Wire the data source and the photo folder. Called once from MainActivity per buildUi. */
-  void bind(AmbientRepository repository, File photosDirectory) {
+  /**
+   * Wire the data source, the photo folder and the wake-phrase source. Called once from
+   * MainActivity per buildUi. The wake phrase is read through the supplier every time the
+   * info screen shows, so a settings change is picked up without rebinding.
+   */
+  void bind(AmbientRepository repository, File photosDirectory, Supplier<String> wakePhrase) {
     repo = repository;
     photosDir = photosDirectory;
+    this.wakePhrase = wakePhrase;
+  }
+
+  private void refreshWakeText() {
+    String phrase = wakePhrase == null ? null : wakePhrase.get();
+    if (phrase == null || phrase.trim().isEmpty()) phrase = "小麦小麦";
+    wakeText.setText("喊「" + phrase.trim() + "」随时唤醒我");
   }
 
   boolean isShowing() {
@@ -244,12 +310,15 @@ final class AmbientView extends FrameLayout {
     mode = Mode.INFO;
     photoLayer.setVisibility(GONE);
     infoLayer.setVisibility(VISIBLE);
+    refreshWakeText();
+    wakeBar.setVisibility(VISIBLE);
     setVisibility(VISIBLE);
     renderClock();
     ui.removeCallbacks(clockTick);
     ui.postDelayed(clockTick, 1000);
     ui.removeCallbacks(shiftTick);
     ui.postDelayed(shiftTick, SHIFT_MS);
+    startBackground();
     refreshData();
   }
 
@@ -259,10 +328,15 @@ final class AmbientView extends FrameLayout {
     ui.removeCallbacks(clockTick);
     ui.removeCallbacks(shiftTick);
     ui.removeCallbacks(photoTick);
+    ui.removeCallbacks(bgTick);
     photoA.animate().cancel();
     photoB.animate().cancel();
     photoA.clearAnimation();
     photoB.clearAnimation();
+    bgA.animate().cancel();
+    bgB.animate().cancel();
+    bgA.clearAnimation();
+    bgB.clearAnimation();
   }
 
   @Override
@@ -277,17 +351,13 @@ final class AmbientView extends FrameLayout {
    */
   boolean enterPhotoMode() {
     if (photosDir == null) return false;
-    File[] listed =
-        photosDir.listFiles(
-            f -> f.isFile() && PHOTO_EXTS.contains(extensionOf(f.getName())));
-    List<File> files = new ArrayList<>();
-    if (listed != null) Collections.addAll(files, listed);
-    Collections.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+    List<File> files = listPhotoFiles(photosDir);
     if (files.isEmpty()) return false;
     photoFiles = files;
     photoIndex = 0;
     mode = Mode.PHOTO;
     infoLayer.setVisibility(GONE);
+    wakeBar.setVisibility(GONE);
     photoLayer.setVisibility(VISIBLE);
     showPhoto(photoIndex);
     ui.removeCallbacks(photoTick);
@@ -298,6 +368,101 @@ final class AmbientView extends FrameLayout {
   private static String extensionOf(String name) {
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+  }
+
+  /** Usable images in the photos folder, in file-name order. Shared by frame and background. */
+  private static List<File> listPhotoFiles(File dir) {
+    File[] listed =
+        dir.listFiles(f -> f.isFile() && PHOTO_EXTS.contains(extensionOf(f.getName())));
+    List<File> files = new ArrayList<>();
+    if (listed != null) Collections.addAll(files, listed);
+    Collections.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+    return files;
+  }
+
+  // ---- info-screen background ----
+
+  /**
+   * Pick the background sources for this showing: the user's photos when the folder holds
+   * any, otherwise the bundled defaults. Starts the slow rotation; the layer itself sits
+   * under the scrim, so brightness never competes with the text above it.
+   */
+  private void startBackground() {
+    bgFiles = photosDir == null ? new ArrayList<>() : listPhotoFiles(photosDir);
+    bgAssetNames = bgFiles.isEmpty() ? listBundledBackgrounds() : new ArrayList<>();
+    bgIndex = 0;
+    ui.removeCallbacks(bgTick);
+    if (bgCount() == 0) return;
+    showBackground(0, false);
+    ui.postDelayed(bgTick, BG_MS);
+  }
+
+  private int bgCount() {
+    return !bgFiles.isEmpty() ? bgFiles.size() : bgAssetNames.size();
+  }
+
+  private List<String> listBundledBackgrounds() {
+    List<String> names = new ArrayList<>();
+    try {
+      String[] listed = getContext().getAssets().list(BG_ASSET_DIR);
+      if (listed != null) {
+        for (String name : listed) {
+          if (PHOTO_EXTS.contains(extensionOf(name))) names.add(name);
+        }
+      }
+    } catch (IOException e) {
+      // No bundled backgrounds readable: the solid colour behind the scrim stays.
+    }
+    Collections.sort(names);
+    return names;
+  }
+
+  /** Same two-ImageView crossfade as the photo frame, minus the push-in animation. */
+  private void showBackground(final int index, final boolean crossfade) {
+    if (index < 0 || index >= bgCount()) return;
+    new Thread(
+            () -> {
+              final Bitmap bitmap =
+                  !bgFiles.isEmpty()
+                      ? decodeSampled(bgFiles.get(index))
+                      : decodeSampledAsset(BG_ASSET_DIR + "/" + bgAssetNames.get(index));
+              if (bitmap == null) return;
+              ui.post(
+                  () -> {
+                    if (!isShowing() || mode != Mode.INFO) {
+                      bitmap.recycle();
+                      return;
+                    }
+                    ImageView incoming = bgFrontIsA ? bgB : bgA;
+                    final ImageView outgoing = bgFrontIsA ? bgA : bgB;
+                    incoming.clearAnimation();
+                    incoming.animate().cancel();
+                    incoming.setImageBitmap(bitmap);
+                    incoming.bringToFront();
+                    bgScrim.bringToFront();
+                    final Bitmap old = bgFrontBitmap;
+                    if (crossfade) {
+                      incoming.setAlpha(0f);
+                      incoming
+                          .animate()
+                          .alpha(1f)
+                          .setDuration(FADE_MS)
+                          .withEndAction(
+                              () -> {
+                                outgoing.setImageBitmap(null);
+                                if (old != null && old != bitmap) old.recycle();
+                              })
+                          .start();
+                    } else {
+                      incoming.setAlpha(1f);
+                      outgoing.setImageBitmap(null);
+                      if (old != null && old != bitmap) old.recycle();
+                    }
+                    bgFrontBitmap = bitmap;
+                    bgFrontIsA = !bgFrontIsA;
+                  });
+            })
+        .start();
   }
 
   // ---- clock / date ----
@@ -332,19 +497,41 @@ final class AmbientView extends FrameLayout {
   }
 
   private void renderWeather(AmbientData.WeatherNow wx) {
-    wxMain.setText(
-        wx.currentTemp != null ? wx.condition + "  " + wx.currentTemp + "°" : wx.condition);
+    // The city name is whatever the hub reported for this reading — never a local constant.
+    wxCity.setVisibility(wx.city.isEmpty() ? GONE : VISIBLE);
+    wxCity.setText(wx.city);
+    wxMain.setText(wx.condition);
     wxRange.setText("今日 " + wx.lowTemp + "° ~ " + wx.highTemp + "°");
+    // The hub payload has no AQI, so none is shown. What remains: a short slice of the
+    // current-conditions detail, the provider name, and when this reading was fetched
+    // (readings can be up to 12 h old by design, so the timestamp always shows).
     List<String> parts = new ArrayList<>();
-    if (wx.aqi != null) parts.add("空气 " + AmbientData.WeatherText.aqiBand(wx.aqi) + " · AQI " + wx.aqi);
+    String detail = detailHead(wx.detail);
+    if (!detail.isEmpty()) parts.add(detail);
+    if (!wx.source.isEmpty()) parts.add(wx.source);
     parts.add(
-        wx.fromCache
-            ? "更新于 " + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(wx.fetchedAtMs))
-            : "实时数据");
+        "更新于 "
+            + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(wx.fetchedAtMs)));
     wxMeta.setText(join(parts));
   }
 
+  /** First clause of the detail text, hard-capped: the meta line stays one short line. */
+  private static String detailHead(String detail) {
+    if (detail == null) return "";
+    String head = detail.trim();
+    int cut = head.length();
+    for (char sep : new char[] {'。', '；', ';', '\n'}) {
+      int at = head.indexOf(sep);
+      if (at >= 0 && at < cut) cut = at;
+    }
+    head = head.substring(0, cut).trim();
+    if (head.length() > 36) head = head.substring(0, 36) + "…";
+    return head;
+  }
+
   private void renderWeatherUnavailable() {
+    wxCity.setVisibility(GONE);
+    wxCity.setText("");
     wxMain.setText("天气暂不可用");
     wxRange.setText("");
     wxMeta.setText("");
@@ -378,11 +565,13 @@ final class AmbientView extends FrameLayout {
       LinearLayout.LayoutParams textsParams = new LinearLayout.LayoutParams(0, -2, 1);
       textsParams.leftMargin = dp(12);
       row.addView(texts, textsParams);
-      texts.addView(text(item.title, 20, 0xfff2f5ff));
+      // Match-parent widths: the text column spans the full row (通栏), titles and summaries
+      // wrap at the row's full width instead of a wrap-content measure.
+      texts.addView(text(item.title, 20, 0xfff2f5ff), new LinearLayout.LayoutParams(-1, -2));
       if (!item.summary.isEmpty()) {
         TextView summary = text(item.summary, 15, 0xffb6c0e2);
         summary.setMaxLines(2);
-        texts.addView(summary);
+        texts.addView(summary, new LinearLayout.LayoutParams(-1, -2));
       }
     }
   }
@@ -472,11 +661,51 @@ final class AmbientView extends FrameLayout {
     }
   }
 
+  /** Asset twin of {@link #decodeSampled(File)}: bounds pass first, then a sampled decode. */
+  private Bitmap decodeSampledAsset(String assetPath) {
+    try {
+      BitmapFactory.Options bounds = new BitmapFactory.Options();
+      bounds.inJustDecodeBounds = true;
+      InputStream boundsIn = getContext().getAssets().open(assetPath);
+      try {
+        BitmapFactory.decodeStream(boundsIn, null, bounds);
+      } finally {
+        boundsIn.close();
+      }
+      if (bounds.outWidth <= 0) return null;
+      int sample = 1;
+      while (bounds.outWidth / sample > 1280) sample *= 2;
+      BitmapFactory.Options opts = new BitmapFactory.Options();
+      opts.inSampleSize = sample;
+      InputStream in = getContext().getAssets().open(assetPath);
+      try {
+        return BitmapFactory.decodeStream(in, null, opts);
+      } finally {
+        in.close();
+      }
+    } catch (IOException | RuntimeException e) {
+      return null;
+    }
+  }
+
   private static final long WEATHER_TTL_MS = 15 * 60_000L;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;
   private static final long PHOTO_MS = 20_000L;
+  private static final long BG_MS = 60_000L;
   private static final long FADE_MS = 700L;
+
+  /** Height of the wake hint strip (dp); the info layer's bottom padding reserves it. */
+  private static final int WAKE_BAR_H = 54;
+
+  /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
+  private static final int WAKE_BAR_BG = 0xe6050813;
+
+  /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
+  private static final String BG_ASSET_DIR = "ambient_bg";
+
+  /** ~60% black over the background photo, so clock/weather/news text stays readable. */
+  private static final int SCRIM_COLOR = 0x99000000;
   private static final List<String> PHOTO_EXTS =
       Arrays.asList("jpg", "jpeg", "png", "webp");
 

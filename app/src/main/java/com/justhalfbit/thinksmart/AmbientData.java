@@ -3,39 +3,43 @@ package com.justhalfbit.thinksmart;
 import java.util.List;
 
 /**
- * Data for the ambient (standby) screen: one day of Beijing weather and the day's AI-news list.
- * Kept free of Android and JSON types so the pure parts (WMO weather-code wording) run in the
- * host unit tests.
+ * Data for the ambient (standby) screen: today's weather (from the hub's /kiosk/weather) and
+ * the day's AI-news list. Kept free of Android and JSON types so the pure parts run in the
+ * host unit tests; JSON parsing lives in AmbientRepository.
  */
 final class AmbientData {
 
   static final class WeatherNow {
-    /** Wording for the day, e.g. 晴 / 多云 / 小雨. */
+    /** Location name as the hub reported it (location.name), "" when absent. Never invented. */
+    final String city;
+    /** Today's condition wording, e.g. 晴 / 多云 / 小雨 (forecast text, or the summary's head). */
     final String condition;
-    /** Current temperature in °C, null when the source did not give one. */
-    final Integer currentTemp;
+    /** Current-conditions detail text from the hub, "" when absent. Display truncates it. */
+    final String detail;
     final int lowTemp;
     final int highTemp;
-    /** US AQI, null when the air-quality call failed. */
-    final Integer aqi;
-    /** When this reading was fetched, epoch ms. */
+    /** Weather provider name as reported (source, e.g. 和风天气), "" when absent. */
+    final String source;
+    /** When this reading was fetched from the hub, epoch ms (client clock). */
     final long fetchedAtMs;
-    /** True when this is the last good reading shown again after a failed refresh. */
+    /** True when this reading came from the on-disk cache rather than a fresh fetch. */
     final boolean fromCache;
 
     WeatherNow(
+        String city,
         String condition,
-        Integer currentTemp,
+        String detail,
         int lowTemp,
         int highTemp,
-        Integer aqi,
+        String source,
         long fetchedAtMs,
         boolean fromCache) {
+      this.city = city;
       this.condition = condition;
-      this.currentTemp = currentTemp;
+      this.detail = detail;
       this.lowTemp = lowTemp;
       this.highTemp = highTemp;
-      this.aqi = aqi;
+      this.source = source;
       this.fetchedAtMs = fetchedAtMs;
       this.fromCache = fromCache;
     }
@@ -65,76 +69,6 @@ final class AmbientData {
       this.items = items;
       this.fromHub = fromHub;
     }
-  }
-
-  /** WMO weather codes (Open-Meteo {@code weather_code}) -> short Chinese wording. */
-  static final class WeatherText {
-    static String of(int code) {
-      switch (code) {
-        case 0:
-          return "晴";
-        case 1:
-          return "晴间多云";
-        case 2:
-          return "多云";
-        case 3:
-          return "阴";
-        case 45:
-        case 48:
-          return "雾";
-        case 51:
-        case 53:
-        case 55:
-          return "毛毛雨";
-        case 56:
-        case 57:
-          return "冻毛毛雨";
-        case 61:
-          return "小雨";
-        case 63:
-          return "中雨";
-        case 65:
-          return "大雨";
-        case 66:
-        case 67:
-          return "冻雨";
-        case 71:
-          return "小雪";
-        case 73:
-          return "中雪";
-        case 75:
-          return "大雪";
-        case 77:
-          return "雪粒";
-        case 80:
-        case 81:
-          return "阵雨";
-        case 82:
-          return "暴雨";
-        case 85:
-        case 86:
-          return "阵雪";
-        case 95:
-          return "雷阵雨";
-        case 96:
-        case 99:
-          return "冰雹";
-        default:
-          return "未知";
-      }
-    }
-
-    /** AQI band wording for the US scale Open-Meteo reports. */
-    static String aqiBand(int aqi) {
-      if (aqi <= 50) return "优";
-      if (aqi <= 100) return "良";
-      if (aqi <= 150) return "轻度污染";
-      if (aqi <= 200) return "中度污染";
-      if (aqi <= 300) return "重度污染";
-      return "严重污染";
-    }
-
-    private WeatherText() {}
   }
 
   private AmbientData() {}

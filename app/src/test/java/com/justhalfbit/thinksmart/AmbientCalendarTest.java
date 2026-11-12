@@ -52,14 +52,8 @@ public class AmbientCalendarTest {
     assertEquals("", LunarCalendar.format(LocalDate.of(2200, 1, 1)));
   }
 
-  @Test
-  public void weatherWording() {
-    assertEquals("晴", AmbientData.WeatherText.of(0));
-    assertEquals("阴", AmbientData.WeatherText.of(3));
-    assertEquals("小雨", AmbientData.WeatherText.of(61));
-    assertEquals("雷阵雨", AmbientData.WeatherText.of(95));
-    assertEquals("未知", AmbientData.WeatherText.of(1234));
-    assertEquals("优", AmbientData.WeatherText.aqiBand(32));
-    assertEquals("轻度污染", AmbientData.WeatherText.aqiBand(120));
-  }
+  // The old weatherWording test pinned AmbientData.WeatherText (WMO code -> wording, AQI
+  // bands). That mapping belonged to the removed Open-Meteo source; the hub's /kiosk/weather
+  // sends ready-made wording, so the class and this test went away together. The kiosk
+  // parsing and the 12 h gate are pinned by AmbientWeatherTest instead.
 }
