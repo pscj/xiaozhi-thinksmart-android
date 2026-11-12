@@ -33,7 +33,7 @@ import java.util.function.Supplier;
  * happening, and a photo frame behind it.
  *
  * <p>MainActivity owns the when: it shows this view after 60 s with no conversation and no
- * touch, asks for photo mode after another 60 s, and hides it on any touch or wake-word hit
+ * touch, using the selected info or photo mode, and hides it on any touch or wake-word hit
  * (activity-level dispatchTouchEvent and the snapshot flow both funnel into its touch()). This
  * view only renders and never touches the voice path — the wake word keeps running in
  * VoiceService whatever is on screen, and hiding is purely visual.
@@ -44,7 +44,7 @@ import java.util.function.Supplier;
  *
  * <p>Photos come from a {@code photos/} folder in the app's external files dir
  * (Android/data/com.justhalfbit.thinksmart/files/photos) — put .jpg/.png/.webp files there;
- * with no photos the frame mode simply never engages.
+ * with no photos the frame mode displays an empty-state hint.
  *
  * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
  * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
@@ -71,6 +71,7 @@ final class AmbientView extends FrameLayout {
   private final LinearLayout wakeBar;
   private final TextView wakeText;
   private final ImageView photoA, photoB;
+  private final TextView photoEmpty;
 
   private final Handler ui = new Handler(Looper.getMainLooper());
   private final Runnable clockTick =
@@ -254,6 +255,10 @@ final class AmbientView extends FrameLayout {
     photoB = photoImage(context);
     photoLayer.addView(photoA, new FrameLayout.LayoutParams(-1, -1));
     photoLayer.addView(photoB, new FrameLayout.LayoutParams(-1, -1));
+    photoEmpty = text("暂无照片\n添加本地照片后可在此轮播", 22, 0xffb6c0e2);
+    photoEmpty.setGravity(Gravity.CENTER);
+    photoEmpty.setVisibility(GONE);
+    photoLayer.addView(photoEmpty, new FrameLayout.LayoutParams(-1, -1));
     photoClock = text("", 30, 0xffffffff);
     photoClock.setShadowLayer(dp(3), 0, dp(1), 0xaa000000);
     photoClock.setPadding(dp(28), 0, 0, dp(24));
@@ -306,20 +311,30 @@ final class AmbientView extends FrameLayout {
   }
 
   void show() {
+    show(Mode.INFO);
+  }
+
+  void show(Mode selectedMode) {
     if (isShowing()) return;
-    mode = Mode.INFO;
-    photoLayer.setVisibility(GONE);
-    infoLayer.setVisibility(VISIBLE);
-    refreshWakeText();
-    wakeBar.setVisibility(VISIBLE);
+    mode = selectedMode;
+    boolean info = mode == Mode.INFO;
+    bgLayer.setVisibility(info ? VISIBLE : GONE);
+    photoLayer.setVisibility(info ? GONE : VISIBLE);
+    infoLayer.setVisibility(info ? VISIBLE : GONE);
+    wakeBar.setVisibility(info ? VISIBLE : GONE);
     setVisibility(VISIBLE);
     renderClock();
     ui.removeCallbacks(clockTick);
     ui.postDelayed(clockTick, 1000);
     ui.removeCallbacks(shiftTick);
-    ui.postDelayed(shiftTick, SHIFT_MS);
-    startBackground();
-    refreshData();
+    if (info) {
+      refreshWakeText();
+      ui.postDelayed(shiftTick, SHIFT_MS);
+      startBackground();
+      refreshData();
+    } else {
+      enterPhotoMode();
+    }
   }
 
   void hide() {
@@ -346,21 +361,27 @@ final class AmbientView extends FrameLayout {
   }
 
   /**
-   * Switch to the photo frame. Returns false (staying on the info screen) when the photos
-   * folder is missing or holds no usable image.
+   * Switch to the photo frame. Returns false and shows an empty-state hint when no photos exist.
    */
   boolean enterPhotoMode() {
-    if (photosDir == null) return false;
-    List<File> files = listPhotoFiles(photosDir);
-    if (files.isEmpty()) return false;
+    List<File> files = photosDir == null ? new ArrayList<>() : listPhotoFiles(photosDir);
     photoFiles = files;
     photoIndex = 0;
     mode = Mode.PHOTO;
+    bgLayer.setVisibility(GONE);
     infoLayer.setVisibility(GONE);
     wakeBar.setVisibility(GONE);
     photoLayer.setVisibility(VISIBLE);
-    showPhoto(photoIndex);
     ui.removeCallbacks(photoTick);
+    photoEmpty.setVisibility(files.isEmpty() ? VISIBLE : GONE);
+    photoA.setImageBitmap(null);
+    photoB.setImageBitmap(null);
+    if (frontBitmap != null) {
+      frontBitmap.recycle();
+      frontBitmap = null;
+    }
+    if (files.isEmpty()) return false;
+    showPhoto(photoIndex);
     ui.postDelayed(photoTick, PHOTO_MS);
     return true;
   }

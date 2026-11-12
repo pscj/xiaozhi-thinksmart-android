@@ -58,10 +58,9 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private OrbView orb;
   private BackdropView backdrop;
   private AmbientView ambient;
-  private boolean ambientPhotoRequested;
   private EditText input;
   private static final long AMBIENT_IDLE_MS = 60_000L;
-  private static final long AMBIENT_PHOTO_MS = 120_000L;
+  private static final String AMBIENT_MODE_PREF = "ambientMode";
   private String rendered = "";
   private Boolean lastConversationStyle, lastAbortStyle;
   private int lastModelLogo = -1;
@@ -101,8 +100,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       };
 
   /**
-   * Ambient standby screen timing: 60 s without a conversation or touch shows the info screen,
-   * another 60 s asks it for photo mode. Anything that counts as interaction (touch() moving
+   * After 60 s without a conversation or touch, show only the selected standby mode.
+   * Anything that counts as interaction (touch() moving
    * lastInteraction, a conversation going active, an overlay, the black curtain) hides it.
    */
   private void updateAmbient(long now) {
@@ -110,11 +109,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     long idleMs = now - lastInteraction;
     if (!active && !overlayOpen && !black && idleMs >= AMBIENT_IDLE_MS) {
       if (!ambient.isShowing()) {
-        ambient.show();
-        ambientPhotoRequested = false;
-      } else if (!ambientPhotoRequested && idleMs >= AMBIENT_PHOTO_MS) {
-        ambientPhotoRequested = true;
-        ambient.enterPhotoMode();
+        ambient.show(prefs.getBoolean(AMBIENT_MODE_PREF, false)
+            ? AmbientView.Mode.PHOTO : AmbientView.Mode.INFO);
       }
     } else if (ambient.isShowing()) {
       ambient.hide();
@@ -609,7 +605,6 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         new AmbientRepository(this, () -> prefs.getString("http", "")),
         photosDir,
         this::displayedWakePhrase);
-    ambientPhotoRequested = false;
     // Below the black curtain: the curtain still wins when the screen blanks.
     frame.addView(ambient, new FrameLayout.LayoutParams(-1, -1));
     curtain = new View(this);
@@ -1391,6 +1386,29 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     TextView brightNote = label("睡眠时段内屏幕将调暗；时段结束后恢复设置的亮度。", 12, 0xff7883ab);
     brightNote.setPadding(0, dp(14), 0, 0);
     bright.addView(brightNote);
+    LinearLayout standby = settingsCard(panel, "待机显示模式",
+        "空闲 1 分钟后进入所选模式；触摸屏幕或说唤醒词可返回。两种模式不会自动切换。");
+    RadioGroup standbyModes = new RadioGroup(this);
+    standbyModes.setOrientation(LinearLayout.HORIZONTAL);
+    RadioButton infoMode = new RadioButton(this);
+    infoMode.setId(View.generateViewId());
+    infoMode.setText("信息屏模式");
+    infoMode.setTextColor(Color.WHITE);
+    RadioButton photoMode = new RadioButton(this);
+    photoMode.setId(View.generateViewId());
+    photoMode.setText("相框模式");
+    photoMode.setTextColor(Color.WHITE);
+    standbyModes.addView(infoMode, new RadioGroup.LayoutParams(0, dp(56), 1));
+    standbyModes.addView(photoMode, new RadioGroup.LayoutParams(0, dp(56), 1));
+    standbyModes.check(prefs.getBoolean(AMBIENT_MODE_PREF, false)
+        ? photoMode.getId() : infoMode.getId());
+    standbyModes.setOnCheckedChangeListener((group, checkedId) -> {
+      prefs.edit().putBoolean(AMBIENT_MODE_PREF, checkedId == photoMode.getId()).apply();
+      touch();
+    });
+    standby.addView(standbyModes);
+    TextView photoNote = label("相框轮播本地照片；没有照片时显示提示。", 12, 0xff7883ab);
+    standby.addView(photoNote);
     LinearLayout screen = settingsCard(panel, "自动熄屏", "一段时间没碰屏幕、也没在对话时熄屏；碰一下屏幕或说唤醒词就亮。关闭后屏幕保持常亮。");
     LinearLayout screenHeader = new LinearLayout(this);
     screenHeader.setGravity(Gravity.CENTER_VERTICAL);
