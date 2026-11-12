@@ -184,7 +184,7 @@ final class AmbientView extends FrameLayout {
     wxMain = text("", 44, 0xfff2f5ff);
     wxMain.setGravity(Gravity.END);
     right.addView(wxMain);
-    wxMeta = text("", 16, 0xff7883ab);
+    wxMeta = text("", 16, 0xffb6c0e2);
     wxMeta.setGravity(Gravity.END);
     // The meta line must stay inside the weather column: full column width, one line,
     // end-ellipsis. Wrap-content width let a long line spill left across the screen.
@@ -237,7 +237,8 @@ final class AmbientView extends FrameLayout {
     dotBg.setColor(0xff43d39e);
     dot.setBackground(dotBg);
     wakeBar.addView(dot, new LinearLayout.LayoutParams(dp(9), dp(9)));
-    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
+    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffffd68a);
+    wakeText.setTypeface(null, Typeface.BOLD);
     LinearLayout.LayoutParams wakeTextParams = new LinearLayout.LayoutParams(-2, -2);
     wakeTextParams.leftMargin = dp(10);
     wakeBar.addView(wakeText, wakeTextParams);
