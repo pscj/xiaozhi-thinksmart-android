@@ -16,6 +16,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -42,6 +44,12 @@ import java.util.Locale;
  * <p>Photos come from a {@code photos/} folder in the app's external files dir
  * (Android/data/com.justhalfbit.thinksmart/files/photos) — put .jpg/.png/.webp files there;
  * with no photos the frame mode simply never engages.
+ *
+ * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
+ * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
+ * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — landscape photos
+ * from Lorem Picsum (Unsplash source photos, free to use). The photo frame mode is
+ * unaffected: it still shows its pictures full-screen at full brightness above everything.
  */
 final class AmbientView extends FrameLayout {
 
@@ -52,6 +60,9 @@ final class AmbientView extends FrameLayout {
 
   Mode mode = Mode.INFO;
 
+  private final FrameLayout bgLayer;
+  private final ImageView bgA, bgB;
+  private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
   private final TextView timeText, dateText, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
@@ -86,6 +97,17 @@ final class AmbientView extends FrameLayout {
           ui.postDelayed(this, PHOTO_MS);
         }
       };
+  private final Runnable bgTick =
+      new Runnable() {
+        public void run() {
+          if (!isShowing() || mode != Mode.INFO) return;
+          if (bgCount() > 1) {
+            bgIndex = (bgIndex + 1) % bgCount();
+            showBackground(bgIndex, true);
+          }
+          ui.postDelayed(this, BG_MS);
+        }
+      };
 
   private AmbientRepository repo;
   private File photosDir;
@@ -97,10 +119,29 @@ final class AmbientView extends FrameLayout {
   private Bitmap frontBitmap;
   private int shiftStep;
 
+  // Info-screen background: the user's photos when the folder has any, else the bundled
+  // defaults (bgAssetNames holds file names inside assets/ambient_bg).
+  private List<File> bgFiles = new ArrayList<>();
+  private List<String> bgAssetNames = new ArrayList<>();
+  private int bgIndex;
+  private boolean bgFrontIsA = true;
+  private Bitmap bgFrontBitmap;
+
   AmbientView(Context context) {
     super(context);
     setBackgroundColor(0xff050813);
     setVisibility(GONE);
+
+    // ---- background layer: photo at the very bottom, dark scrim over it ----
+    bgLayer = new FrameLayout(context);
+    addView(bgLayer, new FrameLayout.LayoutParams(-1, -1));
+    bgA = photoImage(context);
+    bgB = photoImage(context);
+    bgLayer.addView(bgA, new FrameLayout.LayoutParams(-1, -1));
+    bgLayer.addView(bgB, new FrameLayout.LayoutParams(-1, -1));
+    bgScrim = new View(context);
+    bgScrim.setBackgroundColor(SCRIM_COLOR);
+    bgLayer.addView(bgScrim, new FrameLayout.LayoutParams(-1, -1));
 
     // ---- info layer ----
     infoLayer = new LinearLayout(context);
@@ -250,6 +291,7 @@ final class AmbientView extends FrameLayout {
     ui.postDelayed(clockTick, 1000);
     ui.removeCallbacks(shiftTick);
     ui.postDelayed(shiftTick, SHIFT_MS);
+    startBackground();
     refreshData();
   }
 
@@ -259,10 +301,15 @@ final class AmbientView extends FrameLayout {
     ui.removeCallbacks(clockTick);
     ui.removeCallbacks(shiftTick);
     ui.removeCallbacks(photoTick);
+    ui.removeCallbacks(bgTick);
     photoA.animate().cancel();
     photoB.animate().cancel();
     photoA.clearAnimation();
     photoB.clearAnimation();
+    bgA.animate().cancel();
+    bgB.animate().cancel();
+    bgA.clearAnimation();
+    bgB.clearAnimation();
   }
 
   @Override
@@ -277,12 +324,7 @@ final class AmbientView extends FrameLayout {
    */
   boolean enterPhotoMode() {
     if (photosDir == null) return false;
-    File[] listed =
-        photosDir.listFiles(
-            f -> f.isFile() && PHOTO_EXTS.contains(extensionOf(f.getName())));
-    List<File> files = new ArrayList<>();
-    if (listed != null) Collections.addAll(files, listed);
-    Collections.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+    List<File> files = listPhotoFiles(photosDir);
     if (files.isEmpty()) return false;
     photoFiles = files;
     photoIndex = 0;
@@ -298,6 +340,101 @@ final class AmbientView extends FrameLayout {
   private static String extensionOf(String name) {
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+  }
+
+  /** Usable images in the photos folder, in file-name order. Shared by frame and background. */
+  private static List<File> listPhotoFiles(File dir) {
+    File[] listed =
+        dir.listFiles(f -> f.isFile() && PHOTO_EXTS.contains(extensionOf(f.getName())));
+    List<File> files = new ArrayList<>();
+    if (listed != null) Collections.addAll(files, listed);
+    Collections.sort(files, (a, b) -> a.getName().compareTo(b.getName()));
+    return files;
+  }
+
+  // ---- info-screen background ----
+
+  /**
+   * Pick the background sources for this showing: the user's photos when the folder holds
+   * any, otherwise the bundled defaults. Starts the slow rotation; the layer itself sits
+   * under the scrim, so brightness never competes with the text above it.
+   */
+  private void startBackground() {
+    bgFiles = photosDir == null ? new ArrayList<>() : listPhotoFiles(photosDir);
+    bgAssetNames = bgFiles.isEmpty() ? listBundledBackgrounds() : new ArrayList<>();
+    bgIndex = 0;
+    ui.removeCallbacks(bgTick);
+    if (bgCount() == 0) return;
+    showBackground(0, false);
+    ui.postDelayed(bgTick, BG_MS);
+  }
+
+  private int bgCount() {
+    return !bgFiles.isEmpty() ? bgFiles.size() : bgAssetNames.size();
+  }
+
+  private List<String> listBundledBackgrounds() {
+    List<String> names = new ArrayList<>();
+    try {
+      String[] listed = getContext().getAssets().list(BG_ASSET_DIR);
+      if (listed != null) {
+        for (String name : listed) {
+          if (PHOTO_EXTS.contains(extensionOf(name))) names.add(name);
+        }
+      }
+    } catch (IOException e) {
+      // No bundled backgrounds readable: the solid colour behind the scrim stays.
+    }
+    Collections.sort(names);
+    return names;
+  }
+
+  /** Same two-ImageView crossfade as the photo frame, minus the push-in animation. */
+  private void showBackground(final int index, final boolean crossfade) {
+    if (index < 0 || index >= bgCount()) return;
+    new Thread(
+            () -> {
+              final Bitmap bitmap =
+                  !bgFiles.isEmpty()
+                      ? decodeSampled(bgFiles.get(index))
+                      : decodeSampledAsset(BG_ASSET_DIR + "/" + bgAssetNames.get(index));
+              if (bitmap == null) return;
+              ui.post(
+                  () -> {
+                    if (!isShowing() || mode != Mode.INFO) {
+                      bitmap.recycle();
+                      return;
+                    }
+                    ImageView incoming = bgFrontIsA ? bgB : bgA;
+                    final ImageView outgoing = bgFrontIsA ? bgA : bgB;
+                    incoming.clearAnimation();
+                    incoming.animate().cancel();
+                    incoming.setImageBitmap(bitmap);
+                    incoming.bringToFront();
+                    bgScrim.bringToFront();
+                    final Bitmap old = bgFrontBitmap;
+                    if (crossfade) {
+                      incoming.setAlpha(0f);
+                      incoming
+                          .animate()
+                          .alpha(1f)
+                          .setDuration(FADE_MS)
+                          .withEndAction(
+                              () -> {
+                                outgoing.setImageBitmap(null);
+                                if (old != null && old != bitmap) old.recycle();
+                              })
+                          .start();
+                    } else {
+                      incoming.setAlpha(1f);
+                      outgoing.setImageBitmap(null);
+                      if (old != null && old != bitmap) old.recycle();
+                    }
+                    bgFrontBitmap = bitmap;
+                    bgFrontIsA = !bgFrontIsA;
+                  });
+            })
+        .start();
   }
 
   // ---- clock / date ----
@@ -472,11 +609,45 @@ final class AmbientView extends FrameLayout {
     }
   }
 
+  /** Asset twin of {@link #decodeSampled(File)}: bounds pass first, then a sampled decode. */
+  private Bitmap decodeSampledAsset(String assetPath) {
+    try {
+      BitmapFactory.Options bounds = new BitmapFactory.Options();
+      bounds.inJustDecodeBounds = true;
+      InputStream boundsIn = getContext().getAssets().open(assetPath);
+      try {
+        BitmapFactory.decodeStream(boundsIn, null, bounds);
+      } finally {
+        boundsIn.close();
+      }
+      if (bounds.outWidth <= 0) return null;
+      int sample = 1;
+      while (bounds.outWidth / sample > 1280) sample *= 2;
+      BitmapFactory.Options opts = new BitmapFactory.Options();
+      opts.inSampleSize = sample;
+      InputStream in = getContext().getAssets().open(assetPath);
+      try {
+        return BitmapFactory.decodeStream(in, null, opts);
+      } finally {
+        in.close();
+      }
+    } catch (IOException | RuntimeException e) {
+      return null;
+    }
+  }
+
   private static final long WEATHER_TTL_MS = 15 * 60_000L;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;
   private static final long PHOTO_MS = 20_000L;
+  private static final long BG_MS = 60_000L;
   private static final long FADE_MS = 700L;
+
+  /** Bundled fallback backgrounds (Lorem Picsum photos, free to use) under assets/. */
+  private static final String BG_ASSET_DIR = "ambient_bg";
+
+  /** ~60% black over the background photo, so clock/weather/news text stays readable. */
+  private static final int SCRIM_COLOR = 0x99000000;
   private static final List<String> PHOTO_EXTS =
       Arrays.asList("jpg", "jpeg", "png", "webp");
 
