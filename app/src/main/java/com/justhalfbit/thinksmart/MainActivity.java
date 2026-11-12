@@ -88,12 +88,15 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           long now = SystemClock.elapsedRealtime();
           // While the ambient screen is up it counts as the screen being
           // intentionally on: the idle black-out waits until it goes away.
+          // Exception: inside the sleep window the ambient screen no longer
+          // holds the black-out off, so the display can still blank overnight.
           boolean ambientUp = ambient != null && ambient.isShowing();
+          boolean sleeping = snapshot != null && snapshot.sleeping;
           if (Protocol.idleExpired(
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
-              active || overlayOpen || ambientUp)) setBlack(true);
+              active || overlayOpen || (ambientUp && !sleeping))) setBlack(true);
           updateAmbient(now);
           ui.postDelayed(this, 1000);
         }
