@@ -67,7 +67,7 @@ final class AmbientView extends FrameLayout {
   private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxCity, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
+  private final TextView timeText, dateText, wxCity, wxMain, wxMeta, newsTag, photoClock;
   private final LinearLayout newsList;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
@@ -184,12 +184,6 @@ final class AmbientView extends FrameLayout {
     wxMain = text("", 44, 0xfff2f5ff);
     wxMain.setGravity(Gravity.END);
     right.addView(wxMain);
-    wxRange = text("", 22, 0xffb6c0e2);
-    wxRange.setGravity(Gravity.END);
-    LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(-2, -2);
-    rangeParams.topMargin = dp(8);
-    rangeParams.gravity = Gravity.END;
-    right.addView(wxRange, rangeParams);
     wxMeta = text("", 16, 0xff7883ab);
     wxMeta.setGravity(Gravity.END);
     // The meta line must stay inside the weather column: full column width, one line,
@@ -210,10 +204,6 @@ final class AmbientView extends FrameLayout {
     TextView newsTitle = text("今日 AI 新闻", 21, 0xfff2f5ff);
     newsTitle.setTypeface(null, Typeface.BOLD);
     newsHead.addView(newsTitle);
-    newsDate = text("", 16, 0xff7883ab);
-    LinearLayout.LayoutParams newsDateParams = new LinearLayout.LayoutParams(-2, -2);
-    newsDateParams.leftMargin = dp(12);
-    newsHead.addView(newsDate, newsDateParams);
     newsTag = text("示例 · 数据源待接入", 13, 0xffffd68a);
     newsTag.setPadding(dp(10), dp(3), dp(10), dp(3));
     GradientDrawable tagBg = new GradientDrawable();
@@ -526,18 +516,15 @@ final class AmbientView extends FrameLayout {
     // The city name is whatever the hub reported for this reading — never a local constant.
     wxCity.setVisibility(wx.city.isEmpty() ? GONE : VISIBLE);
     wxCity.setText(wx.city);
-    wxMain.setText(wx.condition);
-    wxRange.setText("今日 " + wx.lowTemp + "° ~ " + wx.highTemp + "°");
-    // The hub payload has no AQI, so none is shown. What remains: a short slice of the
-    // current-conditions detail, the provider name, and when this reading was fetched
-    // (readings can be up to 12 h old by design, so the timestamp always shows).
+    // Condition and today's range share one big line, e.g. 晴 1° ~ 15° (the user asked
+    // for them together, same headline size and colour — no separate range line).
+    wxMain.setText(wx.condition + " " + wx.lowTemp + "° ~ " + wx.highTemp + "°");
+    // The hub payload has no AQI, so none is shown. The meta line is only a short slice
+    // of the current-conditions detail — no provider name, no fetch timestamp (the user
+    // found both noisy on the real screen).
     List<String> parts = new ArrayList<>();
     String detail = detailHead(wx.detail);
     if (!detail.isEmpty()) parts.add(detail);
-    if (!wx.source.isEmpty()) parts.add(wx.source);
-    parts.add(
-        "更新于 "
-            + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(wx.fetchedAtMs)));
     wxMeta.setText(join(parts));
   }
 
@@ -559,16 +546,11 @@ final class AmbientView extends FrameLayout {
     wxCity.setVisibility(GONE);
     wxCity.setText("");
     wxMain.setText("天气暂不可用");
-    wxRange.setText("");
     wxMeta.setText("");
   }
 
   private void renderNews(AmbientData.NewsFeed feed) {
     newsTag.setVisibility(feed.fromHub ? GONE : VISIBLE);
-    newsDate.setText(
-        feed.date.isEmpty()
-            ? new SimpleDateFormat("M月d日", Locale.CHINA).format(new Date())
-            : feed.date);
     newsList.removeAllViews();
     for (AmbientData.NewsItem item : feed.items) {
       LinearLayout row = new LinearLayout(getContext());
