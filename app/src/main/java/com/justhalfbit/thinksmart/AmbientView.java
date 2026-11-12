@@ -47,8 +47,8 @@ import java.util.Locale;
  *
  * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
  * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
- * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — landscape photos
- * from Lorem Picsum (Unsplash source photos, free to use). The photo frame mode is
+ * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — the same four
+ * scenic photos the web prototype used, rotating the same way. The photo frame mode is
  * unaffected: it still shows its pictures full-screen at full brightness above everything.
  */
 final class AmbientView extends FrameLayout {
@@ -643,7 +643,7 @@ final class AmbientView extends FrameLayout {
   private static final long BG_MS = 60_000L;
   private static final long FADE_MS = 700L;
 
-  /** Bundled fallback backgrounds (Lorem Picsum photos, free to use) under assets/. */
+  /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
   private static final String BG_ASSET_DIR = "ambient_bg";
 
   /** ~60% black over the background photo, so clock/weather/news text stays readable. */
