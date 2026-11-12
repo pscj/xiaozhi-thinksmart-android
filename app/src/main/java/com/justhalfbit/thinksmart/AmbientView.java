@@ -7,6 +7,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.animation.Animation;
@@ -191,9 +192,12 @@ final class AmbientView extends FrameLayout {
     right.addView(wxRange, rangeParams);
     wxMeta = text("", 16, 0xff7883ab);
     wxMeta.setGravity(Gravity.END);
-    LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(-2, -2);
+    // The meta line must stay inside the weather column: full column width, one line,
+    // end-ellipsis. Wrap-content width let a long line spill left across the screen.
+    wxMeta.setMaxLines(1);
+    wxMeta.setEllipsize(TextUtils.TruncateAt.END);
+    LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(-1, -2);
     metaParams.topMargin = dp(6);
-    metaParams.gravity = Gravity.END;
     right.addView(wxMeta, metaParams);
 
     // ---- news ----
