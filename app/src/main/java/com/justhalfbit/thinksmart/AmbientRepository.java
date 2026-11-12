@@ -25,10 +25,10 @@ import org.json.JSONObject;
  * {@code {"ok": true, "weather": {"location": {"name": …}, "current": {"summary": …,
  * "details": …}, "forecast": [{"text": …, "temp_max": …, "temp_min": …}, …], "source": …}}};
  * the hub decides the city, the client never hardcodes one. The endpoint is rate-limited, so
- * this client calls it at most once per {@link #WEATHER_MIN_INTERVAL_MS}: the last good
+ * successful readings are refreshed after {@link #WEATHER_MIN_INTERVAL_MS}: the last good
  * payload is kept verbatim in a prefs cache together with the client fetch time, fresh cache
  * is served without any request, and a failed fetch falls back to the cache however old (with
- * the next attempt deferred a full interval). Nothing is ever invented: with no cache the
+ * the next attempt deferred five minutes). Nothing is ever invented: with no cache the
  * caller gets null and the UI shows a neutral "unavailable" line instead of numbers.
  *
  * <p>News: GET {hub}/news.json, shaped
@@ -94,8 +94,7 @@ final class AmbientRepository {
     long cachedAt = cached == null ? 0L : cached.fetchedAtMs;
     long lastAttempt = prefs.getLong(KEY_WX_ATTEMPT_AT, 0L);
     if (!weatherFetchDue(cachedAt, lastAttempt, now)) return cached;
-    // Record the attempt before the request: a failure backs off a full interval too, so a
-    // dead hub or a hub-side rate limit never turns into a retry loop from this screen.
+    // Persist attempts so failures retry after five minutes even across screen/app restarts.
     prefs.edit().putLong(KEY_WX_ATTEMPT_AT, now).apply();
     String base = hubHttpBase.get();
     if (base != null) base = base.replaceAll("/+$", "");
@@ -116,13 +115,12 @@ final class AmbientRepository {
   }
 
   /**
-   * The 12-hour gate, kept pure so the host tests can pin it: no request while the cache is
-   * younger than the interval, and no request within an interval of the previous attempt
-   * (successful or not). {@code cachedAtMs} is 0 when there is no cache.
+   * Successful cache lasts 12 hours. Without fresh cache, retry five minutes after the
+   * previous attempt. {@code cachedAtMs} is 0 when there is no usable cache.
    */
   static boolean weatherFetchDue(long cachedAtMs, long lastAttemptMs, long nowMs) {
     if (cachedAtMs > 0L && nowMs - cachedAtMs < WEATHER_MIN_INTERVAL_MS) return false;
-    return nowMs - lastAttemptMs >= WEATHER_MIN_INTERVAL_MS;
+    return lastAttemptMs <= 0L || nowMs - lastAttemptMs >= WEATHER_RETRY_INTERVAL_MS;
   }
 
   /**
@@ -238,8 +236,9 @@ final class AmbientRepository {
     return new AmbientData.NewsFeed("", FALLBACK_NEWS, false);
   }
 
-  /** The hub rate-limits /kiosk/weather: this client asks at most once per 12 hours. */
+  /** Successful weather readings remain fresh for 12 hours. */
   static final long WEATHER_MIN_INTERVAL_MS = 12 * 60 * 60_000L;
+  static final long WEATHER_RETRY_INTERVAL_MS = 5 * 60_000L;
 
   private static final int MAX_NEWS_ITEMS = 6;
 

@@ -101,9 +101,32 @@ public class AmbientWeatherTest {
     assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 13 * HOUR, now));
     // No cache at all and never attempted: fetch.
     assertTrue(AmbientRepository.weatherFetchDue(0L, 0L, now));
-    // No cache but a recent (failed) attempt: back off the full interval.
-    assertFalse(AmbientRepository.weatherFetchDue(0L, now - HOUR, now));
-    // Stale cache but a recent failed attempt: serve the cache, do not retry yet.
-    assertFalse(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 2 * HOUR, now));
+    // Failed requests no longer block retries for twelve hours.
+    assertTrue(AmbientRepository.weatherFetchDue(0L, now - HOUR, now));
+    assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 2 * HOUR, now));
+  }
+
+  @Test
+  public void failedRequestsRetryAtFiveMinuteBoundaryWithOrWithoutOldCache() {
+    long now = 100 * HOUR;
+    long retry = 5 * 60_000L;
+    for (long cache : new long[] {0L, now - 30 * HOUR}) {
+      assertFalse(AmbientRepository.weatherFetchDue(cache, now, now));
+      assertFalse(AmbientRepository.weatherFetchDue(cache, now - retry + 1, now));
+      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry, now));
+      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry - 1, now));
+    }
+  }
+
+  @Test
+  public void successfulRetryStartsTwelveHourWindowAgain() {
+    long succeeded = 100 * HOUR;
+    long expiry = succeeded + 12 * HOUR;
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, succeeded + 5 * 60_000L));
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry - 1));
+    assertTrue(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry));
+    // A failed refresh then waits five minutes; it does not make stale cache fresh.
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L - 1));
+    assertTrue(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L));
   }
 }

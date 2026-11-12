@@ -79,6 +79,7 @@ final class AmbientView extends FrameLayout {
         public void run() {
           if (!isShowing()) return;
           renderClock();
+          if (mode == Mode.INFO) refreshData();
           ui.postDelayed(this, 1000);
         }
       };
@@ -503,7 +504,7 @@ final class AmbientView extends FrameLayout {
   private void refreshData() {
     if (repo == null) return;
     long now = System.currentTimeMillis();
-    if (now - lastWeatherFetchMs > WEATHER_TTL_MS) {
+    if (now - lastWeatherFetchMs >= WEATHER_TTL_MS) {
       lastWeatherFetchMs = now;
       repo.fetchWeather(
           weather -> {
@@ -709,7 +710,8 @@ final class AmbientView extends FrameLayout {
     }
   }
 
-  private static final long WEATHER_TTL_MS = 15 * 60_000L;
+  // Repository serves successful cache for 12 hours; check often enough for failure retries.
+  private static final long WEATHER_TTL_MS = AmbientRepository.WEATHER_RETRY_INTERVAL_MS;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;
   private static final long PHOTO_MS = 20_000L;
