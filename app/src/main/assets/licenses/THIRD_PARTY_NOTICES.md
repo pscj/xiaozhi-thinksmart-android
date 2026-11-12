@@ -15,3 +15,4 @@ This is an independent Android port; no Lenovo or model-provider affiliation.
 唤醒复核使用的 `app/src/main/assets/kws-zh/pinyin.txt` 来自原项目固定提交
 `0e97cc11738ad38c0b21ec2db6cdb39d2c75795e` 的 `thinksmart_client/pinyin.txt`；
 `WakeMatcher` 参考同提交的 `wake_verify.py` 移植，沿用原项目 MIT 许可（见 `ORIGINAL-LICENSE`）。
+g
