@@ -605,7 +605,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     java.io.File externalFiles = getExternalFilesDir(null);
     java.io.File photosDir =
         new java.io.File(externalFiles != null ? externalFiles : getFilesDir(), "photos");
-    ambient.bind(new AmbientRepository(this, () -> prefs.getString("http", "")), photosDir);
+    ambient.bind(
+        new AmbientRepository(this, () -> prefs.getString("http", "")),
+        photosDir,
+        this::displayedWakePhrase);
     ambientPhotoRequested = false;
     // Below the black curtain: the curtain still wins when the screen blanks.
     frame.addView(ambient, new FrameLayout.LayoutParams(-1, -1));

@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 
 /**
  * The ambient (standby) face: an information screen that takes over the kiosk when nothing is
@@ -65,8 +66,10 @@ final class AmbientView extends FrameLayout {
   private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
+  private final TextView timeText, dateText, wxCity, wxMain, wxRange, wxMeta, newsTag, newsDate, photoClock;
   private final LinearLayout newsList;
+  private final LinearLayout wakeBar;
+  private final TextView wakeText;
   private final ImageView photoA, photoB;
 
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -111,6 +114,7 @@ final class AmbientView extends FrameLayout {
 
   private AmbientRepository repo;
   private File photosDir;
+  private Supplier<String> wakePhrase;
   private long lastWeatherFetchMs, lastNewsFetchMs;
 
   private List<File> photoFiles = new ArrayList<>();
@@ -144,9 +148,11 @@ final class AmbientView extends FrameLayout {
     bgLayer.addView(bgScrim, new FrameLayout.LayoutParams(-1, -1));
 
     // ---- info layer ----
+    // Bottom padding reserves the wake bar's strip: the news region ends above the bar, so
+    // the last item can never slide under it.
     infoLayer = new LinearLayout(context);
     infoLayer.setOrientation(LinearLayout.VERTICAL);
-    infoLayer.setPadding(dp(48), dp(36), dp(48), 0);
+    infoLayer.setPadding(dp(48), dp(36), dp(48), dp(WAKE_BAR_H + 8));
     addView(infoLayer, new FrameLayout.LayoutParams(-1, -1));
 
     LinearLayout top = new LinearLayout(context);
@@ -169,6 +175,9 @@ final class AmbientView extends FrameLayout {
     right.setOrientation(LinearLayout.VERTICAL);
     right.setGravity(Gravity.END);
     top.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
+    wxCity = text("", 20, 0xffb6c0e2);
+    wxCity.setGravity(Gravity.END);
+    right.addView(wxCity);
     wxMain = text("", 44, 0xfff2f5ff);
     wxMain.setGravity(Gravity.END);
     right.addView(wxMain);
@@ -214,20 +223,25 @@ final class AmbientView extends FrameLayout {
     newsList.setOrientation(LinearLayout.VERTICAL);
     infoLayer.addView(newsList, new LinearLayout.LayoutParams(-1, 0, 1));
 
-    // ---- wake hint bar, pinned to the bottom of the info screen ----
-    LinearLayout wakeBar = new LinearLayout(context);
+    // ---- wake hint bar: its own full-width strip pinned to the very bottom, a sibling of
+    // the info layer (not part of its flow), with an opaque band so it reads as a bar and
+    // the news above can never run under it. The phrase follows the configured wake word;
+    // the literal here is only the pre-bind placeholder. ----
+    wakeBar = new LinearLayout(context);
     wakeBar.setOrientation(LinearLayout.HORIZONTAL);
     wakeBar.setGravity(Gravity.CENTER);
-    LinearLayout.LayoutParams wakeParams = new LinearLayout.LayoutParams(-1, -2);
-    wakeParams.bottomMargin = dp(22);
-    infoLayer.addView(wakeBar, wakeParams);
+    wakeBar.setBackgroundColor(WAKE_BAR_BG);
+    wakeBar.setVisibility(GONE);
+    addView(
+        wakeBar,
+        new FrameLayout.LayoutParams(-1, dp(WAKE_BAR_H), Gravity.BOTTOM));
     View dot = new View(context);
     GradientDrawable dotBg = new GradientDrawable();
     dotBg.setShape(GradientDrawable.OVAL);
     dotBg.setColor(0xff43d39e);
     dot.setBackground(dotBg);
     wakeBar.addView(dot, new LinearLayout.LayoutParams(dp(9), dp(9)));
-    TextView wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
+    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
     LinearLayout.LayoutParams wakeTextParams = new LinearLayout.LayoutParams(-2, -2);
     wakeTextParams.leftMargin = dp(10);
     wakeBar.addView(wakeText, wakeTextParams);
@@ -270,10 +284,21 @@ final class AmbientView extends FrameLayout {
     return view;
   }
 
-  /** Wire the data source and the photo folder. Called once from MainActivity per buildUi. */
-  void bind(AmbientRepository repository, File photosDirectory) {
+  /**
+   * Wire the data source, the photo folder and the wake-phrase source. Called once from
+   * MainActivity per buildUi. The wake phrase is read through the supplier every time the
+   * info screen shows, so a settings change is picked up without rebinding.
+   */
+  void bind(AmbientRepository repository, File photosDirectory, Supplier<String> wakePhrase) {
     repo = repository;
     photosDir = photosDirectory;
+    this.wakePhrase = wakePhrase;
+  }
+
+  private void refreshWakeText() {
+    String phrase = wakePhrase == null ? null : wakePhrase.get();
+    if (phrase == null || phrase.trim().isEmpty()) phrase = "小麦小麦";
+    wakeText.setText("喊「" + phrase.trim() + "」随时唤醒我");
   }
 
   boolean isShowing() {
@@ -285,6 +310,8 @@ final class AmbientView extends FrameLayout {
     mode = Mode.INFO;
     photoLayer.setVisibility(GONE);
     infoLayer.setVisibility(VISIBLE);
+    refreshWakeText();
+    wakeBar.setVisibility(VISIBLE);
     setVisibility(VISIBLE);
     renderClock();
     ui.removeCallbacks(clockTick);
@@ -330,6 +357,7 @@ final class AmbientView extends FrameLayout {
     photoIndex = 0;
     mode = Mode.PHOTO;
     infoLayer.setVisibility(GONE);
+    wakeBar.setVisibility(GONE);
     photoLayer.setVisibility(VISIBLE);
     showPhoto(photoIndex);
     ui.removeCallbacks(photoTick);
@@ -469,19 +497,41 @@ final class AmbientView extends FrameLayout {
   }
 
   private void renderWeather(AmbientData.WeatherNow wx) {
-    wxMain.setText(
-        wx.currentTemp != null ? wx.condition + "  " + wx.currentTemp + "°" : wx.condition);
+    // The city name is whatever the hub reported for this reading — never a local constant.
+    wxCity.setVisibility(wx.city.isEmpty() ? GONE : VISIBLE);
+    wxCity.setText(wx.city);
+    wxMain.setText(wx.condition);
     wxRange.setText("今日 " + wx.lowTemp + "° ~ " + wx.highTemp + "°");
+    // The hub payload has no AQI, so none is shown. What remains: a short slice of the
+    // current-conditions detail, the provider name, and when this reading was fetched
+    // (readings can be up to 12 h old by design, so the timestamp always shows).
     List<String> parts = new ArrayList<>();
-    if (wx.aqi != null) parts.add("空气 " + AmbientData.WeatherText.aqiBand(wx.aqi) + " · AQI " + wx.aqi);
+    String detail = detailHead(wx.detail);
+    if (!detail.isEmpty()) parts.add(detail);
+    if (!wx.source.isEmpty()) parts.add(wx.source);
     parts.add(
-        wx.fromCache
-            ? "更新于 " + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(wx.fetchedAtMs))
-            : "实时数据");
+        "更新于 "
+            + new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(wx.fetchedAtMs)));
     wxMeta.setText(join(parts));
   }
 
+  /** First clause of the detail text, hard-capped: the meta line stays one short line. */
+  private static String detailHead(String detail) {
+    if (detail == null) return "";
+    String head = detail.trim();
+    int cut = head.length();
+    for (char sep : new char[] {'。', '；', ';', '\n'}) {
+      int at = head.indexOf(sep);
+      if (at >= 0 && at < cut) cut = at;
+    }
+    head = head.substring(0, cut).trim();
+    if (head.length() > 36) head = head.substring(0, 36) + "…";
+    return head;
+  }
+
   private void renderWeatherUnavailable() {
+    wxCity.setVisibility(GONE);
+    wxCity.setText("");
     wxMain.setText("天气暂不可用");
     wxRange.setText("");
     wxMeta.setText("");
@@ -515,11 +565,13 @@ final class AmbientView extends FrameLayout {
       LinearLayout.LayoutParams textsParams = new LinearLayout.LayoutParams(0, -2, 1);
       textsParams.leftMargin = dp(12);
       row.addView(texts, textsParams);
-      texts.addView(text(item.title, 20, 0xfff2f5ff));
+      // Match-parent widths: the text column spans the full row (通栏), titles and summaries
+      // wrap at the row's full width instead of a wrap-content measure.
+      texts.addView(text(item.title, 20, 0xfff2f5ff), new LinearLayout.LayoutParams(-1, -2));
       if (!item.summary.isEmpty()) {
         TextView summary = text(item.summary, 15, 0xffb6c0e2);
         summary.setMaxLines(2);
-        texts.addView(summary);
+        texts.addView(summary, new LinearLayout.LayoutParams(-1, -2));
       }
     }
   }
@@ -642,6 +694,12 @@ final class AmbientView extends FrameLayout {
   private static final long PHOTO_MS = 20_000L;
   private static final long BG_MS = 60_000L;
   private static final long FADE_MS = 700L;
+
+  /** Height of the wake hint strip (dp); the info layer's bottom padding reserves it. */
+  private static final int WAKE_BAR_H = 54;
+
+  /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
+  private static final int WAKE_BAR_BG = 0xe6050813;
 
   /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
   private static final String BG_ASSET_DIR = "ambient_bg";
