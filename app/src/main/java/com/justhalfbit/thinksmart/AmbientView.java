@@ -85,6 +85,7 @@ final class AmbientView extends FrameLayout {
   private final LinearLayout wxForecast;
   private final FrameLayout[] fcCards = new FrameLayout[3];
   private final WeatherIconView[] fcIcons = new WeatherIconView[3];
+  private final LinearLayout[] fcLines = new LinearLayout[3];
   private final TextView[] fcLine1 = new TextView[3];
   private final TextView[] fcLine2 = new TextView[3];
   private final LinearLayout newsList;
@@ -177,7 +178,7 @@ final class AmbientView extends FrameLayout {
     // the last item can never slide under it.
     infoLayer = new LinearLayout(context);
     infoLayer.setOrientation(LinearLayout.VERTICAL);
-    infoLayer.setPadding(dp(48), dp(36), dp(48), dp(WAKE_BAR_H + 8));
+    infoLayer.setPadding(dp(48), dp(20), dp(48), dp(WAKE_BAR_H + 4));
     addView(infoLayer, new FrameLayout.LayoutParams(-1, -1));
 
     LinearLayout top = new LinearLayout(context);
@@ -257,7 +258,7 @@ final class AmbientView extends FrameLayout {
     wxForecast.setOrientation(LinearLayout.HORIZONTAL);
     LinearLayout.LayoutParams forecastParams =
         new LinearLayout.LayoutParams(-1, dp(FORECAST_H_DP));
-    forecastParams.topMargin = dp(20);
+    forecastParams.topMargin = dp(12);
     infoLayer.addView(wxForecast, forecastParams);
     for (int i = 0; i < fcCards.length; i++) {
       FrameLayout card = new FrameLayout(context);
@@ -276,16 +277,19 @@ final class AmbientView extends FrameLayout {
       group.setGravity(Gravity.CENTER_VERTICAL);
       card.addView(group, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
       fcIcons[i] = new WeatherIconView(context);
-      group.addView(fcIcons[i], new LinearLayout.LayoutParams(dp(46), dp(46)));
+      group.addView(fcIcons[i], new LinearLayout.LayoutParams(dp(40), dp(40)));
       LinearLayout lines = new LinearLayout(context);
       lines.setOrientation(LinearLayout.VERTICAL);
       LinearLayout.LayoutParams linesParams = new LinearLayout.LayoutParams(-2, -2);
       linesParams.leftMargin = dp(10);
       group.addView(lines, linesParams);
+      fcLines[i] = lines;
       fcLine1[i] = text("", 19, 0xfff2f5ff);
       fcLine1[i].setTypeface(null, Typeface.BOLD);
+      fcLine1[i].setSingleLine(true);
       lines.addView(fcLine1[i]);
       fcLine2[i] = text("", 19, 0xffb6c0e2);
+      fcLine2[i].setSingleLine(true);
       LinearLayout.LayoutParams line2Params = new LinearLayout.LayoutParams(-2, -2);
       line2Params.topMargin = dp(3);
       lines.addView(fcLine2[i], line2Params);
@@ -307,7 +311,7 @@ final class AmbientView extends FrameLayout {
     newsHead.setOrientation(LinearLayout.HORIZONTAL);
     newsHead.setGravity(Gravity.CENTER_VERTICAL);
     LinearLayout.LayoutParams headParams = new LinearLayout.LayoutParams(-1, -2);
-    headParams.topMargin = dp(30);
+    headParams.topMargin = dp(12);
     newsCol.addView(newsHead, headParams);
     TextView newsTitle = text("今日 AI 新闻", 21, 0xfff2f5ff);
     newsTitle.setTypeface(null, Typeface.BOLD);
@@ -336,14 +340,15 @@ final class AmbientView extends FrameLayout {
     dressBg.setCornerRadius(dp(14));
     dressBg.setStroke(dp(1), 0x40ffffff);
     dressPanel.setBackground(dressBg);
-    dressPanel.setPadding(dp(18), dp(14), dp(18), dp(16));
+    dressPanel.setPadding(dp(18), dp(10), dp(18), dp(10));
     LinearLayout.LayoutParams dressParams = new LinearLayout.LayoutParams(dp(DRESS_W_DP), -2);
     dressParams.leftMargin = dp(16);
-    dressParams.topMargin = dp(26);
+    dressParams.topMargin = dp(12);
     newsArea.addView(dressPanel, dressParams);
     TextView dressTitle = text("明日五行穿衣", 20, 0xfff2f5ff);
     dressTitle.setTypeface(null, Typeface.BOLD);
-    dressPanel.addView(dressTitle);
+    dressTitle.setGravity(Gravity.CENTER_VERTICAL);
+    dressPanel.addView(dressTitle, new LinearLayout.LayoutParams(-1, dp(DRESS_TITLE_H_DP)));
     dressRows = new LinearLayout(context);
     dressRows.setOrientation(LinearLayout.VERTICAL);
     dressPanel.addView(dressRows);
@@ -712,9 +717,26 @@ final class AmbientView extends FrameLayout {
       fcCards[i].setVisibility(VISIBLE);
       AmbientData.ForecastDay day = days.get(i);
       fcIcons[i].setKind(AmbientData.classifyIcon(day.text));
-      fcLine1[i].setText(
-          FORECAST_LABELS[i] + (day.text == null || day.text.isEmpty() ? "" : " " + day.text));
-      fcLine2[i].setText(AmbientRepository.forecastRangeText(day.high, day.low));
+      String line1 =
+          FORECAST_LABELS[i] + (day.text == null || day.text.isEmpty() ? "" : " " + day.text);
+      String line2 = AmbientRepository.forecastRangeText(day.high, day.low);
+      fcLine1[i].setText(line1);
+      fcLine2[i].setText(line2);
+      // The text column gets an exact width measured with a probe Paint: left as nested
+      // wrap-content inside the weight-sized cards, its measured width came out short
+      // and the condition's last character was clipped (多云 lost its 云）. Measured, it
+      // always fits the string it has to hold, whatever the condition wording.
+      int linesW =
+          (int)
+                  Math.ceil(
+                      Math.max(
+                          textWidthPx(line1, sp(19), true), textWidthPx(line2, sp(19), false)))
+              + dp(2);
+      ViewGroup.LayoutParams linesLp = fcLines[i].getLayoutParams();
+      if (linesLp.width != linesW) {
+        linesLp.width = linesW;
+        fcLines[i].setLayoutParams(linesLp);
+      }
     }
   }
 
@@ -743,8 +765,12 @@ final class AmbientView extends FrameLayout {
       LinearLayout row = new LinearLayout(getContext());
       row.setOrientation(LinearLayout.HORIZONTAL);
       row.setGravity(Gravity.CENTER_VERTICAL);
-      LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-      rowParams.topMargin = dp(i == 0 ? 10 : 8);
+      // Exact row height: the panel's total height is a known constant (see the budget
+      // note at the geometry constants), so all five tiers fit by construction instead
+      // of the last ones being squeezed into whatever height is left over.
+      LinearLayout.LayoutParams rowParams =
+          new LinearLayout.LayoutParams(-1, dp(DRESS_ROW_H_DP));
+      rowParams.topMargin = dp(i == 0 ? 8 : 6);
       dressRows.addView(row, rowParams);
       TextView tier = text(WuxingDress.TIER_NAMES[i], 17, tierColor(i));
       if (i == 0) tier.setTypeface(null, Typeface.BOLD);
@@ -781,6 +807,15 @@ final class AmbientView extends FrameLayout {
   private float sp(float size) {
     return TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_SP, size, getResources().getDisplayMetrics());
+  }
+
+  /** Exact advance width of a string at a pixel text size, measured with a probe Paint. */
+  private static float textWidthPx(String value, float sizePx, boolean bold) {
+    if (value == null || value.isEmpty()) return 0f;
+    Paint probe = new Paint(Paint.ANTI_ALIAS_FLAG);
+    probe.setTextSize(sizePx);
+    probe.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+    return probe.measureText(value);
   }
 
   /** Exact glyph height of a string at a pixel text size, measured with a probe Paint. */
@@ -847,8 +882,13 @@ final class AmbientView extends FrameLayout {
       shown++;
       LinearLayout row = new LinearLayout(getContext());
       row.setOrientation(LinearLayout.HORIZONTAL);
-      LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-      rowParams.topMargin = dp(14);
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      // Title-only rows — the hub feed's shape — get an exact height so four of them
+      // are guaranteed to fit the news region; a row carrying a summary (only the
+      // bundled placeholder feed has any) keeps wrap height.
+      LinearLayout.LayoutParams rowParams =
+          new LinearLayout.LayoutParams(-1, item.summary.isEmpty() ? dp(NEWS_ROW_H_DP) : -2);
+      rowParams.topMargin = dp(8);
       newsList.addView(row, rowParams);
 
       TextView chip = text(item.category, 14, 0xff9edaff);
@@ -1002,11 +1042,29 @@ final class AmbientView extends FrameLayout {
   private static final float WX_COND_SP = 22f;
   private static final int WX_DETAILS_W_DP = 160;
   private static final int WX_DETAIL_NAME_W_DP = 52;
-  private static final int FORECAST_H_DP = 88;
+  private static final int FORECAST_H_DP = 66;
   private static final String[] FORECAST_LABELS = {"今天", "明天", "后天"};
 
+  // Vertical budget — recomputed as a whole when the forecast strip joined (the first
+  // ref11 build never re-added it, and on the real panel the region below the strip
+  // came up ~50 dp short: LinearLayout squeezed the overflow out of the dressing
+  // panel's lower rows and the third news row). The screen is 800 px tall, ~533 dp at
+  // the panel's density: top padding 20 + clock/date row ~146 + forecast margin 12 +
+  // strip 66 + bottom reserve 58 leaves ~230 dp for the news region. Against that, the
+  // dressing panel is a known constant — padding 10+10, title 28, first row margin 8,
+  // five rows of 24 with 6 dp gaps = 198, plus its 12 dp top margin = 210 — and the
+  // news column needs 12 (header margin) + ~28 (header) + 4 × (8 + 32) = ~200. Both
+  // fit with slack; exact heights keep it that way regardless of font metrics.
   /** News rows visible below the forecast strip. */
   private static final int MAX_NEWS_VISIBLE = 4;
+
+  /** Exact height of a title-only news row (dp); see the budget note above. */
+  private static final int NEWS_ROW_H_DP = 32;
+
+  /** Dressing panel exact title and tier-row heights (dp); see the budget note above. */
+  private static final int DRESS_TITLE_H_DP = 28;
+
+  private static final int DRESS_ROW_H_DP = 24;
 
   /** Dressing-guide panel width: ~320/1280 of the screen width, as mocked. */
   private static final int DRESS_W_DP = 300;
