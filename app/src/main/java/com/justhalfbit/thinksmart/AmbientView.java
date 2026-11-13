@@ -216,8 +216,9 @@ final class AmbientView extends FrameLayout {
     // Weather cluster (the approved ref11 composition): one compact group, right-aligned
     // as a whole under the city name — an icon column (drawn icon with its condition text
     // centred directly under it), the live temperature as exact glyphs spanning that
-    // column's full height, a hairline, then the detail rows (name fixed-width at the
-    // left, value flush to the right margin). No AQI (the hub has none), no ultraviolet
+    // column's full height, a hairline, then the detail rows (name fixed-width, the
+    // value column measured to its widest value so the two sit tight together). No AQI
+    // (the hub has none), no ultraviolet
     // row, no "updated at" line: just the cluster.
     wxCluster = new LinearLayout(context);
     wxCluster.setOrientation(LinearLayout.HORIZONTAL);
@@ -681,13 +682,29 @@ final class AmbientView extends FrameLayout {
     setHeightPx(wxDivider, targetPx);
     setHeightPx(wxDetails, targetPx);
 
-    // Detail rows: name fixed-width at the left, value flush to the right margin. The
-    // divider is the column's left border — no rows, no divider, cluster stays compact.
+    // Detail rows: name fixed-width at the left, the value column sized to the widest
+    // value actually measured, one small gap between them — name and value sit close
+    // as one compact group. (A weighted value column inside a fixed 160 dp box
+    // stretched each value to the right margin and left a wide empty gap beside the
+    // names on the real panel.) The group as a whole stays flush to the right margin
+    // via the cluster's END gravity, the divider hugging the name column's left; no
+    // rows, no divider, cluster stays compact.
     wxDetails.removeAllViews();
     boolean hasDetails = wx.detailRows != null && !wx.detailRows.isEmpty();
     wxDetails.setVisibility(hasDetails ? VISIBLE : GONE);
     wxDivider.setVisibility(hasDetails ? VISIBLE : GONE);
     if (hasDetails) {
+      float widestValue = 0f;
+      for (AmbientData.DetailRow detail : wx.detailRows) {
+        widestValue = Math.max(widestValue, textWidthPx(detail.value, sp(19), true));
+      }
+      int valueWPx = (int) Math.ceil(widestValue) + dp(2);
+      int detailsWPx = dp(WX_DETAIL_NAME_W_DP) + dp(WX_DETAIL_GAP_DP) + valueWPx;
+      ViewGroup.LayoutParams detailsLp = wxDetails.getLayoutParams();
+      if (detailsLp.width != detailsWPx) {
+        detailsLp.width = detailsWPx;
+        wxDetails.setLayoutParams(detailsLp);
+      }
       for (AmbientData.DetailRow detail : wx.detailRows) {
         LinearLayout row = new LinearLayout(getContext());
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -698,7 +715,9 @@ final class AmbientView extends FrameLayout {
         TextView value = text(detail.value, 19, 0xfff2f5ff);
         value.setTypeface(null, Typeface.BOLD);
         value.setGravity(Gravity.END);
-        row.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(valueWPx, -2);
+        valueParams.leftMargin = dp(WX_DETAIL_GAP_DP);
+        row.addView(value, valueParams);
       }
     }
     renderForecast(wx.forecast);
@@ -1040,8 +1059,13 @@ final class AmbientView extends FrameLayout {
   private static final int WX_ICON_DP = 60;
   private static final int WX_COND_GAP_DP = 5;
   private static final float WX_COND_SP = 22f;
+  /** Construction-time width only: render replaces it with the exact compact width. */
   private static final int WX_DETAILS_W_DP = 160;
+
   private static final int WX_DETAIL_NAME_W_DP = 52;
+
+  /** Gap between a detail row's name and its value (dp). */
+  private static final int WX_DETAIL_GAP_DP = 10;
   private static final int FORECAST_H_DP = 66;
   private static final String[] FORECAST_LABELS = {"今天", "明天", "后天"};
 
