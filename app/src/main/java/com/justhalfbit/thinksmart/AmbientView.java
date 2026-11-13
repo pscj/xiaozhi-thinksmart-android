@@ -77,6 +77,7 @@ final class AmbientView extends FrameLayout {
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
   private final TextView timeText, dateText, wxCity, wxFallback, newsTag, photoClock;
+  private final LinearLayout leftCol;
   private final LinearLayout wxCluster;
   private final WeatherIconView wxIcon;
   private final GlyphTextView wxCondGlyph, wxTempGlyph;
@@ -187,16 +188,20 @@ final class AmbientView extends FrameLayout {
     top.setGravity(Gravity.TOP);
     infoLayer.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
-    LinearLayout left = new LinearLayout(context);
-    left.setOrientation(LinearLayout.VERTICAL);
-    top.addView(left, new LinearLayout.LayoutParams(0, -2, 1.2f));
+    // The clock block: taller than the weather side it shares the top row with (the
+    // 96 sp line reserves the font's full top..bottom), so renderWeather lifts it by
+    // the measured difference — see alignClockBlock — until the date line's bottom
+    // meets the weather cluster's bottom.
+    leftCol = new LinearLayout(context);
+    leftCol.setOrientation(LinearLayout.VERTICAL);
+    top.addView(leftCol, new LinearLayout.LayoutParams(0, -2, 1.2f));
     timeText = text("", 96, 0xfff2f5ff);
     timeText.setTypeface(null, Typeface.BOLD);
-    left.addView(timeText);
+    leftCol.addView(timeText);
     dateText = text("", 24, 0xffb6c0e2);
     LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
     dateParams.topMargin = dp(6);
-    left.addView(dateText, dateParams);
+    leftCol.addView(dateText, dateParams);
 
     LinearLayout right = new LinearLayout(context);
     right.setOrientation(LinearLayout.VERTICAL);
@@ -682,6 +687,7 @@ final class AmbientView extends FrameLayout {
     }
     setHeightPx(wxDivider, targetPx);
     setHeightPx(wxDetails, targetPx);
+    alignClockBlock(!wx.city.isEmpty(), targetPx);
 
     // Detail rows: name fixed-width at the left, the value column sized to the widest
     // value actually measured, one small gap between them — name and value sit close
@@ -865,6 +871,49 @@ final class AmbientView extends FrameLayout {
     Rect bounds = new Rect();
     probe.getTextBounds(value, 0, value.length(), bounds);
     return bounds.height();
+  }
+
+  /**
+   * Lift the clock block until the date line's bottom lands exactly on the weather
+   * cluster's bottom. The two columns share the top row's top anchor, but the clock
+   * block is the taller of the two — its 96 sp line reserves the font's full
+   * top..bottom — so the top row used to be as tall as the clock block and the whole
+   * lower screen sat that much lower than the cluster it belongs under. The lift is
+   * the measured difference between the two blocks (clock block height minus the
+   * cluster bottom's offset within its own column: city line + cluster margin +
+   * cluster body), never a guessed constant; with the block lifted, the top row
+   * shrinks to the weather side's height and the forecast strip, news region and
+   * dressing panel all move up by the same amount, the freed space collecting at
+   * the bottom of the weighted news region, above the wake bar. Recomputed on every
+   * weather render (the cluster body height arrives with it) and applied only when
+   * it changes. The burn-in nudge translates the whole info layer, so the alignment
+   * is against this unshifted base layout.
+   */
+  private void alignClockBlock(boolean cityShown, int clusterBodyPx) {
+    int clockBlockPx = textLineHeightPx(96f, true) + dp(6) + textLineHeightPx(24f, false);
+    int clusterBottomPx =
+        (cityShown ? textLineHeightPx(20f, false) : 0) + dp(10) + clusterBodyPx;
+    int shiftPx = clockBlockPx - clusterBottomPx;
+    LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) leftCol.getLayoutParams();
+    int margin = shiftPx > 0 ? -shiftPx : 0;
+    if (lp.topMargin != margin) {
+      lp.topMargin = margin;
+      leftCol.setLayoutParams(lp);
+    }
+  }
+
+  /**
+   * Height a plain single-line TextView reserves at this text size: the font's full
+   * top..bottom, which is how TextView itself measures a line (font padding
+   * included). Measured with a probe Paint so layout arithmetic uses the same
+   * numbers the real views will.
+   */
+  private int textLineHeightPx(float sizeSp, boolean bold) {
+    Paint probe = new Paint(Paint.ANTI_ALIAS_FLAG);
+    probe.setTextSize(sp(sizeSp));
+    probe.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+    Paint.FontMetricsInt fm = probe.getFontMetricsInt();
+    return fm.bottom - fm.top;
   }
 
   private void setHeightPx(View view, int heightPx) {
@@ -1092,8 +1141,10 @@ final class AmbientView extends FrameLayout {
   // ref11 build never re-added it, and on the real panel the region below the strip
   // came up ~50 dp short: LinearLayout squeezed the overflow out of the dressing
   // panel's lower rows and the third news row). The screen is 800 px tall, ~533 dp at
-  // the panel's density: top padding 20 + clock/date row ~146 + forecast margin 12 +
-  // strip 66 + bottom reserve 58 leaves ~230 dp for the news region. Against that, the
+  // the panel's density: top padding 20 + top row ~120 + forecast margin 12 +
+  // strip 66 + bottom reserve 58 leaves ~255 dp for the news region. (The top row is
+  // the weather side's height, not the clock block's ~146: the clock block is lifted
+  // to bottom-align with the cluster — see alignClockBlock.) Against that, the
   // dressing panel is a known constant — padding 10+10, title 28, first row margin 8,
   // five rows of 24 with 6 dp gaps = 198, plus its 12 dp top margin = 210 — and the
   // news column needs 12 (header margin) + ~28 (header) + 4 × (8 + 32) = ~200. Both
