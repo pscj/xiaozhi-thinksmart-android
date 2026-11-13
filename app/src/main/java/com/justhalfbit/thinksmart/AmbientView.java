@@ -89,6 +89,7 @@ final class AmbientView extends FrameLayout {
   private final TextView[] fcLine1 = new TextView[3];
   private final TextView[] fcLine2 = new TextView[3];
   private final LinearLayout newsList;
+  private final LinearLayout dressPanel;
   private final LinearLayout dressRows;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
@@ -334,19 +335,19 @@ final class AmbientView extends FrameLayout {
 
     // The dressing panel's title is exactly 「明日五行穿衣」 — no date or ganzhi suffix;
     // its five tier rows are (re)built by renderDressPanel whenever the date rolls over.
-    LinearLayout dressPanel = new LinearLayout(context);
+    dressPanel = new LinearLayout(context);
     dressPanel.setOrientation(LinearLayout.VERTICAL);
     GradientDrawable dressBg = new GradientDrawable();
     dressBg.setColor(0x2b141d33);
     dressBg.setCornerRadius(dp(14));
     dressBg.setStroke(dp(1), 0x40ffffff);
     dressPanel.setBackground(dressBg);
-    dressPanel.setPadding(dp(18), dp(10), dp(18), dp(10));
+    dressPanel.setPadding(dp(DRESS_PAD_H_DP), dp(10), dp(DRESS_PAD_H_DP), dp(10));
     LinearLayout.LayoutParams dressParams = new LinearLayout.LayoutParams(dp(DRESS_W_DP), -2);
     dressParams.leftMargin = dp(16);
     dressParams.topMargin = dp(12);
     newsArea.addView(dressPanel, dressParams);
-    TextView dressTitle = text("明日五行穿衣", 20, 0xfff2f5ff);
+    TextView dressTitle = text(DRESS_TITLE, 20, 0xfff2f5ff);
     dressTitle.setTypeface(null, Typeface.BOLD);
     dressTitle.setGravity(Gravity.CENTER_VERTICAL);
     dressPanel.addView(dressTitle, new LinearLayout.LayoutParams(-1, dp(DRESS_TITLE_H_DP)));
@@ -780,6 +781,24 @@ final class AmbientView extends FrameLayout {
     dressDate = tomorrow;
     dressRows.removeAllViews();
     WuxingDress.Element[] tiers = WuxingDress.tiersFor(tomorrow);
+    // Panel width follows its widest content, measured: the title with a probe Paint,
+    // each tier row at its established pitch (the tier-name slot plus one fixed slot
+    // per swatch) — plus the panel's own side padding. No fixed width with empty
+    // room at the rows' right; the panel's right edge stays put and the weighted
+    // news column on its left absorbs the freed width.
+    int widestRowPx = 0;
+    for (WuxingDress.Element tierElement : tiers) {
+      int rowPx =
+          dp(DRESS_TIER_W_DP) + WuxingDress.swatches(tierElement).length * dp(DRESS_SWATCH_W_DP);
+      widestRowPx = Math.max(widestRowPx, rowPx);
+    }
+    int titlePx = (int) Math.ceil(textWidthPx(DRESS_TITLE, sp(20), true)) + dp(2);
+    int panelWPx = Math.max(titlePx, widestRowPx) + 2 * dp(DRESS_PAD_H_DP);
+    ViewGroup.LayoutParams panelLp = dressPanel.getLayoutParams();
+    if (panelLp.width != panelWPx) {
+      panelLp.width = panelWPx;
+      dressPanel.setLayoutParams(panelLp);
+    }
     for (int i = 0; i < WuxingDress.TIER_NAMES.length; i++) {
       LinearLayout row = new LinearLayout(getContext());
       row.setOrientation(LinearLayout.HORIZONTAL);
@@ -793,13 +812,13 @@ final class AmbientView extends FrameLayout {
       dressRows.addView(row, rowParams);
       TextView tier = text(WuxingDress.TIER_NAMES[i], 17, tierColor(i));
       if (i == 0) tier.setTypeface(null, Typeface.BOLD);
-      row.addView(tier, new LinearLayout.LayoutParams(dp(46), -2));
+      row.addView(tier, new LinearLayout.LayoutParams(dp(DRESS_TIER_W_DP), -2));
       // Each colour sits in a fixed-pitch slot: dot + single-character name, white.
       for (WuxingDress.Swatch swatch : WuxingDress.swatches(tiers[i])) {
         LinearLayout slot = new LinearLayout(getContext());
         slot.setOrientation(LinearLayout.HORIZONTAL);
         slot.setGravity(Gravity.CENTER_VERTICAL);
-        row.addView(slot, new LinearLayout.LayoutParams(dp(62), -2));
+        row.addView(slot, new LinearLayout.LayoutParams(dp(DRESS_SWATCH_W_DP), -2));
         View dot = new View(getContext());
         GradientDrawable dotBg = new GradientDrawable();
         dotBg.setShape(GradientDrawable.OVAL);
@@ -1090,8 +1109,23 @@ final class AmbientView extends FrameLayout {
 
   private static final int DRESS_ROW_H_DP = 24;
 
-  /** Dressing-guide panel width: ~320/1280 of the screen width, as mocked. */
+  /**
+   * Dressing-guide panel width at construction; renderDressPanel replaces it with the
+   * measured content width (268 dp at the pitch below: rows 46 + 3×62, padding 2×18;
+   * the measured title is narrower and never governs).
+   */
   private static final int DRESS_W_DP = 300;
+
+  /** The dressing panel's title text — exactly this, no date or ganzhi suffix. */
+  private static final String DRESS_TITLE = "明日五行穿衣";
+
+  /** Dressing panel horizontal padding (dp), each side. */
+  private static final int DRESS_PAD_H_DP = 18;
+
+  /** Dressing tier-row pitch (dp): the tier-name slot, then one slot per swatch. */
+  private static final int DRESS_TIER_W_DP = 46;
+
+  private static final int DRESS_SWATCH_W_DP = 62;
 
   /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
   private static final String BG_ASSET_DIR = "ambient_bg";
