@@ -416,7 +416,7 @@ final class AmbientRepository {
   static final long WEATHER_MIN_INTERVAL_MS = 3 * 60 * 60_000L;
   static final long WEATHER_RETRY_INTERVAL_MS = 5 * 60_000L;
 
-  private static final int MAX_NEWS_ITEMS = 6;
+  private static final int MAX_NEWS_ITEMS = 8;
 
   /** The meta line shows at most this many current-conditions detail pairs. */
   private static final int MAX_DETAIL_ITEMS = 4;

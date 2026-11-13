@@ -147,6 +147,8 @@ final class AmbientView extends FrameLayout {
   private int photoIndex;
   /** The "tomorrow" the dressing panel currently shows; rebuilt when the date rolls over. */
   private LocalDate dressDate;
+  /** The last news feed rendered; re-rendered when the news list's height changes. */
+  private AmbientData.NewsFeed lastNewsFeed;
   private boolean frontIsA = true;
   private Bitmap frontBitmap;
   private int shiftStep;
@@ -180,7 +182,7 @@ final class AmbientView extends FrameLayout {
     // the last item can never slide under it.
     infoLayer = new LinearLayout(context);
     infoLayer.setOrientation(LinearLayout.VERTICAL);
-    infoLayer.setPadding(dp(48), dp(20), dp(48), dp(WAKE_BAR_H + 4));
+    infoLayer.setPadding(dp(48), dp(INFO_PAD_TOP_DP), dp(48), dp(WAKE_BAR_H + 4));
     addView(infoLayer, new FrameLayout.LayoutParams(-1, -1));
 
     LinearLayout top = new LinearLayout(context);
@@ -305,7 +307,8 @@ final class AmbientView extends FrameLayout {
     // ---- news column + tomorrow's dressing-guide panel ----
     // The panel takes the news region's right side (its right edge lines up with the
     // forecast cards'); the news column narrows to what is left and its titles truncate
-    // at the panel's left edge instead of running under it.
+    // at the panel's left edge instead of running under it. The panel is anchored to
+    // the region's bottom edge, level with the news column's end.
     LinearLayout newsArea = new LinearLayout(context);
     newsArea.setOrientation(LinearLayout.HORIZONTAL);
     infoLayer.addView(newsArea, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -337,6 +340,19 @@ final class AmbientView extends FrameLayout {
     newsList = new LinearLayout(context);
     newsList.setOrientation(LinearLayout.VERTICAL);
     newsCol.addView(newsList, new LinearLayout.LayoutParams(-1, 0, 1));
+    // The visible row count follows the list's real height (see renderNews): when the
+    // region's height settles or changes — the forecast strip appearing, the info
+    // layer's top padding growing for the lifted clock block — re-render the last
+    // feed so the rows refill the space instead of leaving it empty. The list's own
+    // height comes from its weighted slot, never from its children, so re-rendering
+    // cannot retrigger this.
+    newsList.addOnLayoutChangeListener(
+        (v, l, t, r, b, ol, ot, orr, ob) -> {
+          if (b - t != ob - ot && lastNewsFeed != null) {
+            // Posted, not run inline: the child list must not change mid-layout.
+            ui.post(() -> renderNews(lastNewsFeed));
+          }
+        });
 
     // The dressing panel's title is exactly 「明日五行穿衣」 — no date or ganzhi suffix;
     // its five tier rows are (re)built by renderDressPanel whenever the date rolls over.
@@ -350,7 +366,9 @@ final class AmbientView extends FrameLayout {
     dressPanel.setPadding(dp(DRESS_PAD_H_DP), dp(10), dp(DRESS_PAD_H_DP), dp(10));
     LinearLayout.LayoutParams dressParams = new LinearLayout.LayoutParams(dp(DRESS_W_DP), -2);
     dressParams.leftMargin = dp(16);
-    dressParams.topMargin = dp(12);
+    // Bottom-anchored: the panel's lower edge sits on the news region's bottom edge,
+    // level with where the news column ends, instead of hanging from the region's top.
+    dressParams.gravity = Gravity.BOTTOM;
     newsArea.addView(dressPanel, dressParams);
     TextView dressTitle = text(DRESS_TITLE, 20, 0xfff2f5ff);
     dressTitle.setTypeface(null, Typeface.BOLD);
@@ -887,7 +905,8 @@ final class AmbientView extends FrameLayout {
    * the bottom of the weighted news region, above the wake bar. Recomputed on every
    * weather render (the cluster body height arrives with it) and applied only when
    * it changes. The burn-in nudge translates the whole info layer, so the alignment
-   * is against this unshifted base layout.
+   * is against this unshifted base layout — and the layer's top padding grows with
+   * the lift (see below), so the lifted clock glyphs always stay on the panel.
    */
   private void alignClockBlock(boolean cityShown, int clusterBodyPx) {
     int clockBlockPx = textLineHeightPx(96f, true) + dp(6) + textLineHeightPx(24f, false);
@@ -899,6 +918,22 @@ final class AmbientView extends FrameLayout {
     if (lp.topMargin != margin) {
       lp.topMargin = margin;
       leftCol.setLayoutParams(lp);
+    }
+    // The lift is a negative margin: it pulls the block above the info layer's top
+    // padding, and whatever passes the layer's own top edge is clipped by the parent
+    // — on the real panel the lift (~26 dp) exceeded the padding (20 dp) and shaved
+    // the clock glyphs' tops off. Keep physical room for the lift: the layer's top
+    // padding grows to the lift plus headroom (which also covers the burn-in nudge's
+    // upward steps). Both columns sit in the same row under that padding, so the
+    // bottom alignment between them is untouched; the few dp come out of the
+    // weighted news region.
+    int padTopPx = Math.max(dp(INFO_PAD_TOP_DP), shiftPx + dp(CLOCK_HEADROOM_DP));
+    if (infoLayer.getPaddingTop() != padTopPx) {
+      infoLayer.setPadding(
+          infoLayer.getPaddingLeft(),
+          padTopPx,
+          infoLayer.getPaddingRight(),
+          infoLayer.getPaddingBottom());
     }
   }
 
@@ -960,22 +995,42 @@ final class AmbientView extends FrameLayout {
     }
   }
 
+  /**
+   * How many news rows to show. Title-only rows have an exact height (row + gap), so
+   * the count is whatever the news list's measured height holds, capped at the feed
+   * layer's item cap; before the first layout the historical four stand in and the
+   * list's layout listener re-renders once the real height is known. Rows carrying a
+   * summary have wrap height — only the bundled placeholder feed has any — and keep
+   * the conservative four.
+   */
+  private int newsRowLimit(AmbientData.NewsFeed feed) {
+    for (AmbientData.NewsItem item : feed.items) {
+      if (!item.summary.isEmpty()) return Math.min(feed.items.size(), 4);
+    }
+    int heightPx = newsList.getHeight();
+    if (heightPx <= 0) return 4;
+    int fit = heightPx / dp(NEWS_ROW_H_DP + NEWS_ROW_GAP_DP);
+    return Math.min(MAX_NEWS_ROWS, fit);
+  }
+
   private void renderNews(AmbientData.NewsFeed feed) {
+    lastNewsFeed = feed;
     newsTag.setVisibility(feed.fromHub ? GONE : VISIBLE);
     newsList.removeAllViews();
+    int limit = newsRowLimit(feed);
     int shown = 0;
     for (AmbientData.NewsItem item : feed.items) {
-      if (shown >= MAX_NEWS_VISIBLE) break;
+      if (shown >= limit) break;
       shown++;
       LinearLayout row = new LinearLayout(getContext());
       row.setOrientation(LinearLayout.HORIZONTAL);
       row.setGravity(Gravity.CENTER_VERTICAL);
-      // Title-only rows — the hub feed's shape — get an exact height so four of them
-      // are guaranteed to fit the news region; a row carrying a summary (only the
-      // bundled placeholder feed has any) keeps wrap height.
+      // Title-only rows — the hub feed's shape — get an exact height, so how many
+      // fit the news region is pure arithmetic (see newsRowLimit); a row carrying
+      // a summary (only the bundled placeholder feed has any) keeps wrap height.
       LinearLayout.LayoutParams rowParams =
           new LinearLayout.LayoutParams(-1, item.summary.isEmpty() ? dp(NEWS_ROW_H_DP) : -2);
-      rowParams.topMargin = dp(8);
+      rowParams.topMargin = dp(NEWS_ROW_GAP_DP);
       newsList.addView(row, rowParams);
 
       TextView chip = text(item.category, 14, 0xff9edaff);
@@ -1120,6 +1175,12 @@ final class AmbientView extends FrameLayout {
   /** Height of the wake hint strip (dp); the info layer's bottom padding reserves it. */
   private static final int WAKE_BAR_H = 54;
 
+  /** Info layer's base top padding (dp); grows when the lifted clock block needs room. */
+  private static final int INFO_PAD_TOP_DP = 20;
+
+  /** Clearance kept above the lifted clock block (dp); covers the burn-in upward steps. */
+  private static final int CLOCK_HEADROOM_DP = 6;
+
   /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
   private static final int WAKE_BAR_BG = 0xe6050813;
 
@@ -1141,19 +1202,24 @@ final class AmbientView extends FrameLayout {
   // ref11 build never re-added it, and on the real panel the region below the strip
   // came up ~50 dp short: LinearLayout squeezed the overflow out of the dressing
   // panel's lower rows and the third news row). The screen is 800 px tall, ~533 dp at
-  // the panel's density: top padding 20 + top row ~120 + forecast margin 12 +
-  // strip 66 + bottom reserve 58 leaves ~255 dp for the news region. (The top row is
+  // the panel's density: top padding (20 base, growing to the clock lift + 6 when the
+  // clock block is lifted — see alignClockBlock) + top row ~120 + forecast margin 12 +
+  // strip 66 + bottom reserve 58 leaves ~245 dp for the news region. (The top row is
   // the weather side's height, not the clock block's ~146: the clock block is lifted
-  // to bottom-align with the cluster — see alignClockBlock.) Against that, the
-  // dressing panel is a known constant — padding 10+10, title 28, first row margin 8,
-  // five rows of 24 with 6 dp gaps = 198, plus its 12 dp top margin = 210 — and the
-  // news column needs 12 (header margin) + ~28 (header) + 4 × (8 + 32) = ~200. Both
-  // fit with slack; exact heights keep it that way regardless of font metrics.
-  /** News rows visible below the forecast strip. */
-  private static final int MAX_NEWS_VISIBLE = 4;
+  // to bottom-align with the cluster.) Against that, the dressing panel is a known
+  // constant — padding 10+10, title 28, first row margin 8, five rows of 24 with
+  // 6 dp gaps ≈ 200 — anchored to the region's bottom edge, and the news column
+  // shows as many exact-pitch rows (gap 8 + height 32) as fit under its ~40 dp of
+  // header, capped at MAX_NEWS_ROWS. Exact heights keep the fit independent of font
+  // metrics.
+  /** Absolute cap on visible news rows; the shown count follows the region's height. */
+  private static final int MAX_NEWS_ROWS = 8;
 
   /** Exact height of a title-only news row (dp); see the budget note above. */
   private static final int NEWS_ROW_H_DP = 32;
+
+  /** Vertical gap above each news row (dp): the row pitch is height + gap. */
+  private static final int NEWS_ROW_GAP_DP = 8;
 
   /** Dressing panel exact title and tier-row heights (dp); see the budget note above. */
   private static final int DRESS_TITLE_H_DP = 28;
