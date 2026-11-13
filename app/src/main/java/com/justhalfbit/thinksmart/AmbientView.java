@@ -3,6 +3,9 @@ package com.justhalfbit.thinksmart;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -12,14 +15,15 @@ import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.Animation;
 import android.view.animation.ScaleAnimation;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
 import android.widget.TextView;
 import java.io.File;
 import java.io.IOException;
@@ -72,12 +76,19 @@ final class AmbientView extends FrameLayout {
   private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxCity, wxTemp, wxCond, wxRange, wxMeta, newsTag,
-      photoClock;
+  private final TextView timeText, dateText, wxCity, wxFallback, newsTag, photoClock;
+  private final LinearLayout wxCluster;
+  private final WeatherIconView wxIcon;
+  private final GlyphTextView wxCondGlyph, wxTempGlyph;
   private final View wxDivider;
-  /** Sibling ids inside the RelativeLayout headline row, for baseline/position rules. */
-  private int wxTempId, wxDividerId, wxRangeId;
+  private final LinearLayout wxDetails;
+  private final LinearLayout wxForecast;
+  private final FrameLayout[] fcCards = new FrameLayout[3];
+  private final WeatherIconView[] fcIcons = new WeatherIconView[3];
+  private final TextView[] fcLine1 = new TextView[3];
+  private final TextView[] fcLine2 = new TextView[3];
   private final LinearLayout newsList;
+  private final LinearLayout dressRows;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
   private final ImageView photoA, photoB;
@@ -131,6 +142,8 @@ final class AmbientView extends FrameLayout {
 
   private List<File> photoFiles = new ArrayList<>();
   private int photoIndex;
+  /** The "tomorrow" the dressing panel currently shows; rebuilt when the date rolls over. */
+  private LocalDate dressDate;
   private boolean frontIsA = true;
   private Bitmap frontBitmap;
   private int shiftStep;
@@ -190,63 +203,112 @@ final class AmbientView extends FrameLayout {
     wxCity = text("", 20, 0xffb6c0e2);
     wxCity.setGravity(Gravity.END);
     right.addView(wxCity);
-    // Headline row (the approved mock's composition): the live temperature huge at
-    // the left, a hairline divider, then condition over today's range. The range
-    // is BASELINE-aligned to the temperature (RelativeLayout rules), not
-    // bottom-aligned: two font sizes share one text baseline, so the digits end
-    // level even though the views' own heights differ. Bottom-aligning the views
-    // left the big number's base hanging below the range on the real device.
-    // The city above and the detail line below stay their own rows; nothing
-    // outside this block is touched.
-    RelativeLayout wxHead = new RelativeLayout(context);
-    right.addView(wxHead, new LinearLayout.LayoutParams(-2, -2));
-    wxTemp = text("", 80, 0xfff2f5ff);
-    wxTemp.setTypeface(null, Typeface.BOLD);
-    wxTempId = View.generateViewId();
-    wxTemp.setId(wxTempId);
-    RelativeLayout.LayoutParams tempParams = new RelativeLayout.LayoutParams(-2, -2);
-    tempParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-    wxHead.addView(wxTemp, tempParams);
+    // Graceful-degradation line: shown only when no reading is available at all, in
+    // place of the whole weather cluster, so the corner never shows a half-empty layout.
+    wxFallback = text("天气暂不可用", 24, 0xfff2f5ff);
+    wxFallback.setGravity(Gravity.END);
+    wxFallback.setVisibility(GONE);
+    LinearLayout.LayoutParams fallbackParams = new LinearLayout.LayoutParams(-1, -2);
+    fallbackParams.topMargin = dp(16);
+    right.addView(wxFallback, fallbackParams);
+
+    // Weather cluster (the approved ref11 composition): one compact group, right-aligned
+    // as a whole under the city name — an icon column (drawn icon with its condition text
+    // centred directly under it), the live temperature as exact glyphs spanning that
+    // column's full height, a hairline, then the detail rows (name fixed-width at the
+    // left, value flush to the right margin). No AQI (the hub has none), no ultraviolet
+    // row, no "updated at" line: just the cluster.
+    wxCluster = new LinearLayout(context);
+    wxCluster.setOrientation(LinearLayout.HORIZONTAL);
+    wxCluster.setGravity(Gravity.END | Gravity.TOP);
+    LinearLayout.LayoutParams clusterParams = new LinearLayout.LayoutParams(-1, -2);
+    clusterParams.topMargin = dp(10);
+    right.addView(wxCluster, clusterParams);
+
+    LinearLayout iconCol = new LinearLayout(context);
+    iconCol.setOrientation(LinearLayout.VERTICAL);
+    iconCol.setGravity(Gravity.CENTER_HORIZONTAL);
+    wxCluster.addView(iconCol, new LinearLayout.LayoutParams(-2, -2));
+    wxIcon = new WeatherIconView(context);
+    iconCol.addView(wxIcon, new LinearLayout.LayoutParams(dp(WX_ICON_DP), dp(WX_ICON_DP)));
+    wxCondGlyph = new GlyphTextView(context, false);
+    LinearLayout.LayoutParams condParams = new LinearLayout.LayoutParams(-2, -2);
+    condParams.topMargin = dp(WX_COND_GAP_DP);
+    iconCol.addView(wxCondGlyph, condParams);
+
+    wxTempGlyph = new GlyphTextView(context, true);
+    LinearLayout.LayoutParams tempGlyphParams = new LinearLayout.LayoutParams(-2, -2);
+    tempGlyphParams.leftMargin = dp(10);
+    wxCluster.addView(wxTempGlyph, tempGlyphParams);
+
     wxDivider = new View(context);
     wxDivider.setBackgroundColor(0x59ffffff);
-    wxDividerId = View.generateViewId();
-    wxDivider.setId(wxDividerId);
-    RelativeLayout.LayoutParams dividerParams = new RelativeLayout.LayoutParams(dp(1), dp(64));
-    dividerParams.leftMargin = dp(10);
-    dividerParams.rightMargin = dp(10);
-    dividerParams.addRule(RelativeLayout.RIGHT_OF, wxTempId);
-    dividerParams.addRule(RelativeLayout.ALIGN_BOTTOM, wxTempId);
-    wxHead.addView(wxDivider, dividerParams);
-    wxRange = text("", 26, 0xffb6c0e2);
-    wxRangeId = View.generateViewId();
-    wxRange.setId(wxRangeId);
-    RelativeLayout.LayoutParams rangeParams = new RelativeLayout.LayoutParams(-2, -2);
-    rangeParams.addRule(RelativeLayout.RIGHT_OF, wxDividerId);
-    rangeParams.addRule(RelativeLayout.ALIGN_BASELINE, wxTempId);
-    wxHead.addView(wxRange, rangeParams);
-    wxCond = text("", 30, 0xfff2f5ff);
-    RelativeLayout.LayoutParams condParams = new RelativeLayout.LayoutParams(-2, -2);
-    condParams.addRule(RelativeLayout.ABOVE, wxRangeId);
-    condParams.addRule(RelativeLayout.ALIGN_LEFT, wxRangeId);
-    condParams.bottomMargin = dp(2);
-    wxHead.addView(wxCond, condParams);
-    wxMeta = text("", 16, 0xffb6c0e2);
-    wxMeta.setGravity(Gravity.END);
-    // The meta line must stay inside the weather column: full column width, one line,
-    // end-ellipsis. Wrap-content width let a long line spill left across the screen.
-    wxMeta.setMaxLines(1);
-    wxMeta.setEllipsize(TextUtils.TruncateAt.END);
-    LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(-1, -2);
-    metaParams.topMargin = dp(14);
-    right.addView(wxMeta, metaParams);
+    LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(dp(1), dp(80));
+    dividerParams.leftMargin = dp(14);
+    dividerParams.rightMargin = dp(14);
+    wxCluster.addView(wxDivider, dividerParams);
 
-    // ---- news ----
+    wxDetails = new LinearLayout(context);
+    wxDetails.setOrientation(LinearLayout.VERTICAL);
+    wxCluster.addView(wxDetails, new LinearLayout.LayoutParams(dp(WX_DETAILS_W_DP), dp(80)));
+
+    // ---- three-day forecast strip: equal translucent cards under the cluster ----
+    wxForecast = new LinearLayout(context);
+    wxForecast.setOrientation(LinearLayout.HORIZONTAL);
+    LinearLayout.LayoutParams forecastParams =
+        new LinearLayout.LayoutParams(-1, dp(FORECAST_H_DP));
+    forecastParams.topMargin = dp(20);
+    infoLayer.addView(wxForecast, forecastParams);
+    for (int i = 0; i < fcCards.length; i++) {
+      FrameLayout card = new FrameLayout(context);
+      GradientDrawable cardBg = new GradientDrawable();
+      cardBg.setColor(0x2b141d33);
+      cardBg.setCornerRadius(dp(14));
+      cardBg.setStroke(dp(1), 0x40ffffff);
+      card.setBackground(cardBg);
+      LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, -1, 1);
+      if (i > 0) cardParams.leftMargin = dp(16);
+      wxForecast.addView(card, cardParams);
+      fcCards[i] = card;
+      // Icon + two lines as one group, centred in the card (the mock's composition).
+      LinearLayout group = new LinearLayout(context);
+      group.setOrientation(LinearLayout.HORIZONTAL);
+      group.setGravity(Gravity.CENTER_VERTICAL);
+      card.addView(group, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+      fcIcons[i] = new WeatherIconView(context);
+      group.addView(fcIcons[i], new LinearLayout.LayoutParams(dp(46), dp(46)));
+      LinearLayout lines = new LinearLayout(context);
+      lines.setOrientation(LinearLayout.VERTICAL);
+      LinearLayout.LayoutParams linesParams = new LinearLayout.LayoutParams(-2, -2);
+      linesParams.leftMargin = dp(10);
+      group.addView(lines, linesParams);
+      fcLine1[i] = text("", 19, 0xfff2f5ff);
+      fcLine1[i].setTypeface(null, Typeface.BOLD);
+      lines.addView(fcLine1[i]);
+      fcLine2[i] = text("", 19, 0xffb6c0e2);
+      LinearLayout.LayoutParams line2Params = new LinearLayout.LayoutParams(-2, -2);
+      line2Params.topMargin = dp(3);
+      lines.addView(fcLine2[i], line2Params);
+    }
+
+    // ---- news column + tomorrow's dressing-guide panel ----
+    // The panel takes the news region's right side (its right edge lines up with the
+    // forecast cards'); the news column narrows to what is left and its titles truncate
+    // at the panel's left edge instead of running under it.
+    LinearLayout newsArea = new LinearLayout(context);
+    newsArea.setOrientation(LinearLayout.HORIZONTAL);
+    infoLayer.addView(newsArea, new LinearLayout.LayoutParams(-1, 0, 1));
+
+    LinearLayout newsCol = new LinearLayout(context);
+    newsCol.setOrientation(LinearLayout.VERTICAL);
+    newsArea.addView(newsCol, new LinearLayout.LayoutParams(0, -1, 1));
+
     LinearLayout newsHead = new LinearLayout(context);
     newsHead.setOrientation(LinearLayout.HORIZONTAL);
     newsHead.setGravity(Gravity.CENTER_VERTICAL);
     LinearLayout.LayoutParams headParams = new LinearLayout.LayoutParams(-1, -2);
-    headParams.topMargin = dp(34);
-    infoLayer.addView(newsHead, headParams);
+    headParams.topMargin = dp(30);
+    newsCol.addView(newsHead, headParams);
     TextView newsTitle = text("今日 AI 新闻", 21, 0xfff2f5ff);
     newsTitle.setTypeface(null, Typeface.BOLD);
     newsHead.addView(newsTitle);
@@ -263,7 +325,28 @@ final class AmbientView extends FrameLayout {
 
     newsList = new LinearLayout(context);
     newsList.setOrientation(LinearLayout.VERTICAL);
-    infoLayer.addView(newsList, new LinearLayout.LayoutParams(-1, 0, 1));
+    newsCol.addView(newsList, new LinearLayout.LayoutParams(-1, 0, 1));
+
+    // The dressing panel's title is exactly 「明日五行穿衣」 — no date or ganzhi suffix;
+    // its five tier rows are (re)built by renderDressPanel whenever the date rolls over.
+    LinearLayout dressPanel = new LinearLayout(context);
+    dressPanel.setOrientation(LinearLayout.VERTICAL);
+    GradientDrawable dressBg = new GradientDrawable();
+    dressBg.setColor(0x2b141d33);
+    dressBg.setCornerRadius(dp(14));
+    dressBg.setStroke(dp(1), 0x40ffffff);
+    dressPanel.setBackground(dressBg);
+    dressPanel.setPadding(dp(18), dp(14), dp(18), dp(16));
+    LinearLayout.LayoutParams dressParams = new LinearLayout.LayoutParams(dp(DRESS_W_DP), -2);
+    dressParams.leftMargin = dp(16);
+    dressParams.topMargin = dp(26);
+    newsArea.addView(dressPanel, dressParams);
+    TextView dressTitle = text("明日五行穿衣", 20, 0xfff2f5ff);
+    dressTitle.setTypeface(null, Typeface.BOLD);
+    dressPanel.addView(dressTitle);
+    dressRows = new LinearLayout(context);
+    dressRows.setOrientation(LinearLayout.VERTICAL);
+    dressPanel.addView(dressRows);
 
     // ---- wake hint bar: its own full-width strip pinned to the very bottom, a sibling of
     // the info layer (not part of its flow), with an opaque band so it reads as a bar and
@@ -539,6 +622,7 @@ final class AmbientView extends FrameLayout {
     String lunar = LunarCalendar.format(LocalDate.now());
     String date = new SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(now);
     dateText.setText(lunar.isEmpty() ? date : date + " · " + lunar);
+    renderDressPanel();
   }
 
   // ---- data ----
@@ -564,79 +648,203 @@ final class AmbientView extends FrameLayout {
     // The city name is whatever the hub reported for this reading — never a local constant.
     wxCity.setVisibility(wx.city.isEmpty() ? GONE : VISIBLE);
     wxCity.setText(wx.city);
-    // Headline row: with a live temperature, the big number and the divider show and
-    // the stack carries condition over today's range (10° | 霾 / 1° ~ 15°). Without
-    // one, only the stack shows — no empty number, no divider.
-    boolean hasTemp = wx.currentTemp != null;
-    wxTemp.setVisibility(hasTemp ? VISIBLE : GONE);
-    wxTemp.setText(hasTemp ? wx.currentTemp + "°" : "");
-    wxDivider.setVisibility(hasTemp ? VISIBLE : GONE);
-    anchorRangeLine(hasTemp);
-    wxCond.setText(wx.condition);
-    wxRange.setText(wx.lowTemp + "° ~ " + wx.highTemp + "°");
-    // The hub payload has no AQI, so none is shown. The meta line is only a short slice
-    // of the current-conditions detail — no provider name, no fetch timestamp (the user
-    // found both noisy on the real screen).
-    List<String> parts = new ArrayList<>();
-    String detail = detailHead(wx.detail);
-    if (!detail.isEmpty()) parts.add(detail);
-    wxMeta.setText(join(parts));
+    wxFallback.setVisibility(GONE);
+    wxCluster.setVisibility(VISIBLE);
+
+    String condition = wx.condition == null ? "" : wx.condition;
+    wxIcon.setKind(AmbientData.classifyIcon(condition));
+    float condSizePx = sp(WX_COND_SP);
+    wxCondGlyph.setGlyphText(condition, condSizePx, 0xfff2f5ff);
+    // The temperature's glyph height equals the icon column's full height — icon + gap +
+    // the condition glyph's own height — with every part measured, never estimated: the
+    // temperature's font size is scaled from a probe measurement to hit that target, so
+    // its top aligns with the icon's top and its bottom with the condition's bottom.
+    int targetPx =
+        dp(WX_ICON_DP)
+            + dp(WX_COND_GAP_DP)
+            + Math.round(glyphHeightPx(condition, condSizePx, false));
+    if (wx.currentTemp != null) {
+      String tempText = wx.currentTemp + "°";
+      float probePx = glyphHeightPx(tempText, 100f, true);
+      float sizePx = probePx > 0 ? 100f * targetPx / probePx : 100f;
+      wxTempGlyph.setGlyphText(tempText, sizePx, 0xfff2f5ff);
+      wxTempGlyph.setVisibility(VISIBLE);
+    } else {
+      // No live temperature: no empty number — the rest of the cluster keeps its shape.
+      wxTempGlyph.setVisibility(GONE);
+    }
+    setHeightPx(wxDivider, targetPx);
+    setHeightPx(wxDetails, targetPx);
+
+    // Detail rows: name fixed-width at the left, value flush to the right margin. The
+    // divider is the column's left border — no rows, no divider, cluster stays compact.
+    wxDetails.removeAllViews();
+    boolean hasDetails = wx.detailRows != null && !wx.detailRows.isEmpty();
+    wxDetails.setVisibility(hasDetails ? VISIBLE : GONE);
+    wxDivider.setVisibility(hasDetails ? VISIBLE : GONE);
+    if (hasDetails) {
+      for (AmbientData.DetailRow detail : wx.detailRows) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        wxDetails.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
+        TextView name = text(detail.name, 19, 0xffb6c0e2);
+        row.addView(name, new LinearLayout.LayoutParams(dp(WX_DETAIL_NAME_W_DP), -2));
+        TextView value = text(detail.value, 19, 0xfff2f5ff);
+        value.setTypeface(null, Typeface.BOLD);
+        value.setGravity(Gravity.END);
+        row.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
+      }
+    }
+    renderForecast(wx.forecast);
   }
 
-  /** First clause of the detail text, hard-capped: the meta line stays one short line. */
-  private static String detailHead(String detail) {
-    if (detail == null) return "";
-    String head = detail.trim();
-    int cut = head.length();
-    for (char sep : new char[] {'。', '；', ';', '\n'}) {
-      int at = head.indexOf(sep);
-      if (at >= 0 && at < cut) cut = at;
+  /** The forecast strip: the hub's first three days, one card each, hidden when absent. */
+  private void renderForecast(List<AmbientData.ForecastDay> days) {
+    boolean any = days != null && !days.isEmpty();
+    wxForecast.setVisibility(any ? VISIBLE : GONE);
+    if (!any) return;
+    for (int i = 0; i < fcCards.length; i++) {
+      if (i >= days.size()) {
+        fcCards[i].setVisibility(GONE);
+        continue;
+      }
+      fcCards[i].setVisibility(VISIBLE);
+      AmbientData.ForecastDay day = days.get(i);
+      fcIcons[i].setKind(AmbientData.classifyIcon(day.text));
+      fcLine1[i].setText(
+          FORECAST_LABELS[i] + (day.text == null || day.text.isEmpty() ? "" : " " + day.text));
+      fcLine2[i].setText(AmbientRepository.forecastRangeText(day.high, day.low));
     }
-    head = head.substring(0, cut).trim();
-    if (head.length() > 36) head = head.substring(0, 36) + "…";
-    return head;
   }
 
   private void renderWeatherUnavailable() {
     wxCity.setVisibility(GONE);
     wxCity.setText("");
-    wxTemp.setVisibility(GONE);
-    wxTemp.setText("");
-    wxDivider.setVisibility(GONE);
-    anchorRangeLine(false);
-    wxCond.setText("天气暂不可用");
-    wxRange.setText("");
-    wxMeta.setText("");
+    wxCluster.setVisibility(GONE);
+    wxForecast.setVisibility(GONE);
+    wxFallback.setVisibility(VISIBLE);
+  }
+
+  // ---- tomorrow's five-element dressing guide ----
+
+  /**
+   * Rebuild the dressing panel when the date rolls over. Tomorrow's tiers are computed
+   * from the date on the spot (see WuxingDress) — nothing is cached across days, so the
+   * panel is always tomorrow's, never yesterday's leftovers.
+   */
+  private void renderDressPanel() {
+    LocalDate tomorrow = LocalDate.now().plusDays(1);
+    if (tomorrow.equals(dressDate)) return;
+    dressDate = tomorrow;
+    dressRows.removeAllViews();
+    WuxingDress.Element[] tiers = WuxingDress.tiersFor(tomorrow);
+    for (int i = 0; i < WuxingDress.TIER_NAMES.length; i++) {
+      LinearLayout row = new LinearLayout(getContext());
+      row.setOrientation(LinearLayout.HORIZONTAL);
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+      rowParams.topMargin = dp(i == 0 ? 10 : 8);
+      dressRows.addView(row, rowParams);
+      TextView tier = text(WuxingDress.TIER_NAMES[i], 17, tierColor(i));
+      if (i == 0) tier.setTypeface(null, Typeface.BOLD);
+      row.addView(tier, new LinearLayout.LayoutParams(dp(46), -2));
+      // Each colour sits in a fixed-pitch slot: dot + single-character name, white.
+      for (WuxingDress.Swatch swatch : WuxingDress.swatches(tiers[i])) {
+        LinearLayout slot = new LinearLayout(getContext());
+        slot.setOrientation(LinearLayout.HORIZONTAL);
+        slot.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(slot, new LinearLayout.LayoutParams(dp(62), -2));
+        View dot = new View(getContext());
+        GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dotBg.setColor(swatch.color);
+        dotBg.setStroke(dp(1), 0x66ffffff);
+        dot.setBackground(dotBg);
+        slot.addView(dot, new LinearLayout.LayoutParams(dp(13), dp(13)));
+        TextView name = text(swatch.name, 16, 0xfff2f5ff);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-2, -2);
+        nameParams.leftMargin = dp(5);
+        slot.addView(name, nameParams);
+      }
+    }
+  }
+
+  /** Tier-name styling from the mock: 大吉 amber bold, 忌用 soft red, the rest plain. */
+  private static int tierColor(int tierIndex) {
+    if (tierIndex == 0) return 0xffffd68a;
+    if (tierIndex == WuxingDress.TIER_NAMES.length - 1) return 0xfff28b8b;
+    return 0xfff2f5ff;
+  }
+
+  /** sp → px, matching TextView's own conversion, for glyph measurements. */
+  private float sp(float size) {
+    return TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP, size, getResources().getDisplayMetrics());
+  }
+
+  /** Exact glyph height of a string at a pixel text size, measured with a probe Paint. */
+  private static float glyphHeightPx(String value, float sizePx, boolean bold) {
+    if (value == null || value.isEmpty()) return 0f;
+    Paint probe = new Paint(Paint.ANTI_ALIAS_FLAG);
+    probe.setTextSize(sizePx);
+    probe.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+    Rect bounds = new Rect();
+    probe.getTextBounds(value, 0, value.length(), bounds);
+    return bounds.height();
+  }
+
+  private void setHeightPx(View view, int heightPx) {
+    ViewGroup.LayoutParams lp = view.getLayoutParams();
+    if (lp != null && lp.height != heightPx) {
+      lp.height = heightPx;
+      view.setLayoutParams(lp);
+    }
   }
 
   /**
-   * Re-anchors the range line inside the headline row. With a live temperature the
-   * range hangs right of the divider and shares the temperature's text baseline, so
-   * the digits of both sizes end level. Without one, the temperature and the
-   * divider are GONE — a baseline rule against a gone sibling resolves
-   * unpredictably, so the range anchors to the parent instead (left edge, bottom)
-   * and the condition stays above it: the lone stack keeps its shape.
+   * A text view sized to its glyphs' exact bounds — no font ascent/descent padding — so a
+   * line of text can be aligned edge-to-edge with neighbouring graphics: the cluster's
+   * temperature spans the icon column exactly, and the condition text's own measured
+   * height feeds that span. The glyphs are drawn at the view's origin.
    */
-  private void anchorRangeLine(boolean withTemp) {
-    RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) wxRange.getLayoutParams();
-    if (withTemp) {
-      lp.removeRule(RelativeLayout.ALIGN_PARENT_LEFT);
-      lp.removeRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
-      lp.addRule(RelativeLayout.RIGHT_OF, wxDividerId);
-      lp.addRule(RelativeLayout.ALIGN_BASELINE, wxTempId);
-    } else {
-      lp.removeRule(RelativeLayout.RIGHT_OF);
-      lp.removeRule(RelativeLayout.ALIGN_BASELINE);
-      lp.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-      lp.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+  private static final class GlyphTextView extends View {
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Rect bounds = new Rect();
+    private String glyphText = "";
+
+    GlyphTextView(Context context, boolean bold) {
+      super(context);
+      paint.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
     }
-    wxRange.setLayoutParams(lp);
+
+    void setGlyphText(String value, float sizePx, int color) {
+      glyphText = value == null ? "" : value;
+      paint.setTextSize(sizePx);
+      paint.setColor(color);
+      paint.getTextBounds(glyphText, 0, glyphText.length(), bounds);
+      requestLayout();
+      invalidate();
+    }
+
+    @Override
+    protected void onMeasure(int widthSpec, int heightSpec) {
+      setMeasuredDimension(Math.max(1, bounds.width()), Math.max(1, bounds.height()));
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+      if (!glyphText.isEmpty()) canvas.drawText(glyphText, -bounds.left, -bounds.top, paint);
+    }
   }
 
   private void renderNews(AmbientData.NewsFeed feed) {
     newsTag.setVisibility(feed.fromHub ? GONE : VISIBLE);
     newsList.removeAllViews();
+    int shown = 0;
     for (AmbientData.NewsItem item : feed.items) {
+      if (shown >= MAX_NEWS_VISIBLE) break;
+      shown++;
       LinearLayout row = new LinearLayout(getContext());
       row.setOrientation(LinearLayout.HORIZONTAL);
       LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
@@ -657,24 +865,18 @@ final class AmbientView extends FrameLayout {
       LinearLayout.LayoutParams textsParams = new LinearLayout.LayoutParams(0, -2, 1);
       textsParams.leftMargin = dp(12);
       row.addView(texts, textsParams);
-      // Match-parent widths: the text column spans the full row (通栏), titles and summaries
-      // wrap at the row's full width instead of a wrap-content measure.
-      texts.addView(text(item.title, 20, 0xfff2f5ff), new LinearLayout.LayoutParams(-1, -2));
+      // Titles live in the narrowed news column now: one line, end-ellipsis — the right
+      // edge stops at the dressing panel instead of running the full screen width.
+      TextView title = text(item.title, 20, 0xfff2f5ff);
+      title.setMaxLines(1);
+      title.setEllipsize(TextUtils.TruncateAt.END);
+      texts.addView(title, new LinearLayout.LayoutParams(-1, -2));
       if (!item.summary.isEmpty()) {
         TextView summary = text(item.summary, 15, 0xffb6c0e2);
         summary.setMaxLines(2);
         texts.addView(summary, new LinearLayout.LayoutParams(-1, -2));
       }
     }
-  }
-
-  private static String join(List<String> parts) {
-    StringBuilder out = new StringBuilder();
-    for (String part : parts) {
-      if (out.length() > 0) out.append("  ·  ");
-      out.append(part);
-    }
-    return out.toString();
   }
 
   // ---- photo frame ----
@@ -793,6 +995,21 @@ final class AmbientView extends FrameLayout {
 
   /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
   private static final int WAKE_BAR_BG = 0xe6050813;
+
+  // Weather cluster + forecast strip geometry (the approved ref11 composition).
+  private static final int WX_ICON_DP = 60;
+  private static final int WX_COND_GAP_DP = 5;
+  private static final float WX_COND_SP = 22f;
+  private static final int WX_DETAILS_W_DP = 160;
+  private static final int WX_DETAIL_NAME_W_DP = 52;
+  private static final int FORECAST_H_DP = 88;
+  private static final String[] FORECAST_LABELS = {"今天", "明天", "后天"};
+
+  /** News rows visible below the forecast strip. */
+  private static final int MAX_NEWS_VISIBLE = 4;
+
+  /** Dressing-guide panel width: ~320/1280 of the screen width, as mocked. */
+  private static final int DRESS_W_DP = 300;
 
   /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
   private static final String BG_ASSET_DIR = "ambient_bg";

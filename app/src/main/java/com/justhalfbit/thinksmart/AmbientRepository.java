@@ -148,6 +148,9 @@ final class AmbientRepository {
     JSONObject current = weather.optJSONObject("current");
     String summary = current == null ? "" : current.optString("summary").trim();
     String detail = current == null ? "" : formatDetails(current.opt("details"));
+    List<AmbientData.DetailRow> detailRows =
+        current == null ? new ArrayList<>() : parseDetailRows(current.opt("details"));
+    List<AmbientData.ForecastDay> days = parseForecast(forecast);
     // The hub's live condition (current.condition) describes what it is like right now and
     // beats today's forecast wording; without it the forecast text, then the summary head,
     // stand in as before. current.temp is optional in the same way — absent stays null and
@@ -161,7 +164,91 @@ final class AmbientRepository {
     String city = location == null ? "" : location.optString("name").trim();
     String source = weather.optString("source").trim();
     return new AmbientData.WeatherNow(
-        city, condition, detail, low, high, currentTemp, source, fetchedAtMs, fromCache);
+        city,
+        condition,
+        detail,
+        detailRows,
+        days,
+        low,
+        high,
+        currentTemp,
+        source,
+        fetchedAtMs,
+        fromCache);
+  }
+
+  /**
+   * The detail column's rows from the hub's details pairs, in the screen's fixed order:
+   * feels-like, humidity, wind. The wind pair's label is the direction word itself (the
+   * hub keys it that way, e.g. "东风" → "2级"), so it becomes the row's name verbatim.
+   * Missing entries are simply absent from the list; unparseable input yields no rows.
+   */
+  static List<AmbientData.DetailRow> parseDetailRows(Object details) {
+    List<AmbientData.DetailRow> rows = new ArrayList<>();
+    JSONObject obj = detailsObject(details);
+    if (obj == null) return rows;
+    String feels = detailValue(obj, "体感温度");
+    if (!feels.isEmpty()) rows.add(new AmbientData.DetailRow("体感", feels));
+    String humidity = detailValue(obj, "相对湿度");
+    if (!humidity.isEmpty()) rows.add(new AmbientData.DetailRow("湿度", humidity));
+    Iterator<String> keys = obj.keys();
+    while (keys.hasNext()) {
+      String key = keys.next();
+      if (key == null) continue;
+      String label = key.trim();
+      if (!label.endsWith("风")) continue;
+      String value = detailValue(obj, key);
+      if (!value.isEmpty()) rows.add(new AmbientData.DetailRow(label, value));
+      break;
+    }
+    return rows;
+  }
+
+  /** Scalar value of one details entry, trimmed; "" for missing/nested/unusable values. */
+  private static String detailValue(JSONObject obj, String key) {
+    if (obj == null || obj.isNull(key)) return "";
+    Object value = obj.opt(key);
+    if (value == null || value == JSONObject.NULL) return "";
+    if (value instanceof JSONObject || value instanceof JSONArray) return "";
+    return String.valueOf(value).trim();
+  }
+
+  /** The details as an object: a JSONObject directly, or a string holding one. Else null. */
+  private static JSONObject detailsObject(Object details) {
+    if (details instanceof JSONObject) return (JSONObject) details;
+    if (details instanceof String) {
+      String text = ((String) details).trim();
+      if (text.startsWith("{")) {
+        try {
+          return new JSONObject(text);
+        } catch (Exception e) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** All forecast days the hub sent, in order; temps null where a day did not report them. */
+  static List<AmbientData.ForecastDay> parseForecast(JSONArray forecast) {
+    List<AmbientData.ForecastDay> days = new ArrayList<>();
+    if (forecast == null) return days;
+    for (int i = 0; i < forecast.length(); i++) {
+      JSONObject day = forecast.optJSONObject(i);
+      if (day == null) continue;
+      days.add(
+          new AmbientData.ForecastDay(
+              day.optString("text").trim(), optTemp(day, "temp_max"), optTemp(day, "temp_min")));
+    }
+    return days;
+  }
+
+  /** The forecast card's range line: "{high}° / {low}°", degrading to whichever side exists. */
+  static String forecastRangeText(Integer high, Integer low) {
+    if (high != null && low != null) return high + "° / " + low + "°";
+    if (high != null) return high + "°";
+    if (low != null) return low + "°";
+    return "";
   }
 
   /**

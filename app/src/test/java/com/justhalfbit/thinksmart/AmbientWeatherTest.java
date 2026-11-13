@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.List;
 import org.json.JSONObject;
 import org.junit.Test;
 
@@ -184,6 +185,102 @@ public class AmbientWeatherTest {
       assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry, now));
       assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry - 1, now));
     }
+  }
+
+  @Test
+  public void detailRowsFromObjectForm() throws Exception {
+    AmbientData.WeatherNow now =
+        AmbientRepository.parseKioskWeather(
+            weather(
+                "{\"current\": {\"summary\": \"晴，微风\", \"details\":"
+                    + " {\"北风\": \"2级\", \"相对湿度\": \"62%\", \"紫外线\": \"弱\","
+                    + " \"体感温度\": \"7℃\"}},"
+                    + "\"forecast\": [{\"text\": \"晴\", \"temp_max\": 11, \"temp_min\": 2}]}"),
+            0L,
+            false);
+    assertNotNull(now);
+    // Fixed display order — feels-like, humidity, wind — whatever the hub's key order was.
+    // 紫外线 is not a row: the cluster shows three rows at most.
+    assertEquals(3, now.detailRows.size());
+    assertEquals("体感", now.detailRows.get(0).name);
+    assertEquals("7℃", now.detailRows.get(0).value);
+    assertEquals("湿度", now.detailRows.get(1).name);
+    assertEquals("62%", now.detailRows.get(1).value);
+    // The wind pair's key IS the direction word; it becomes the row name verbatim.
+    assertEquals("北风", now.detailRows.get(2).name);
+    assertEquals("2级", now.detailRows.get(2).value);
+  }
+
+  @Test
+  public void detailRowsFromStringFormAndMissingEntries() throws Exception {
+    // A details string holding a JSON object parses into rows the same way.
+    List<AmbientData.DetailRow> fromString =
+        AmbientRepository.parseDetailRows("{\"相对湿度\":\"40%\",\"南风\":\"3级\"}");
+    assertEquals(2, fromString.size());
+    assertEquals("湿度", fromString.get(0).name);
+    assertEquals("40%", fromString.get(0).value);
+    assertEquals("南风", fromString.get(1).name);
+    assertEquals("3级", fromString.get(1).value);
+    // Missing entries are simply absent — no placeholder rows.
+    List<AmbientData.DetailRow> onlyFeels =
+        AmbientRepository.parseDetailRows(new JSONObject("{\"体感温度\":\"6°\"}"));
+    assertEquals(1, onlyFeels.size());
+    assertEquals("体感", onlyFeels.get(0).name);
+    assertEquals("6°", onlyFeels.get(0).value);
+    // Plain text, broken JSON and null yield no rows at all.
+    assertTrue(AmbientRepository.parseDetailRows("体感温度 7℃").isEmpty());
+    assertTrue(AmbientRepository.parseDetailRows("{broken").isEmpty());
+    assertTrue(AmbientRepository.parseDetailRows(null).isEmpty());
+  }
+
+  @Test
+  public void forecastParsingKeepsAllDaysAndCleansTemps() throws Exception {
+    AmbientData.WeatherNow now =
+        AmbientRepository.parseKioskWeather(
+            weather(
+                "{\"forecast\": ["
+                    + "{\"text\": \"晴\", \"temp_max\": 12, \"temp_min\": -2},"
+                    + "{\"text\": \"晴\", \"temp_max\": \"11°\", \"temp_min\": \"-3°\"},"
+                    + "{\"text\": \"多云\", \"temp_max\": \"8\", \"temp_min\": \"-3\"},"
+                    + "{\"text\": \"小雪\", \"temp_max\": \"暂无\", \"temp_min\": \"-9\"}]}"),
+            0L,
+            false);
+    assertNotNull(now);
+    // All days are kept in hub order — the strip picks the first three itself.
+    assertEquals(4, now.forecast.size());
+    assertEquals(Integer.valueOf(12), now.forecast.get(0).high);
+    assertEquals(Integer.valueOf(-2), now.forecast.get(0).low);
+    // String temperatures carrying a degree suffix clean up to plain numbers.
+    assertEquals(Integer.valueOf(11), now.forecast.get(1).high);
+    assertEquals(Integer.valueOf(-3), now.forecast.get(1).low);
+    assertEquals("多云", now.forecast.get(2).text);
+    // An unreported temperature stays null on that day instead of failing the parse.
+    assertNull(now.forecast.get(3).high);
+    assertEquals(Integer.valueOf(-9), now.forecast.get(3).low);
+  }
+
+  @Test
+  public void classifyIconMapping() {
+    assertEquals(AmbientData.WeatherIcon.SUN, AmbientData.classifyIcon("晴"));
+    assertEquals(AmbientData.WeatherIcon.SUN_CLOUD, AmbientData.classifyIcon("多云"));
+    assertEquals(AmbientData.WeatherIcon.CLOUD, AmbientData.classifyIcon("阴"));
+    assertEquals(AmbientData.WeatherIcon.CLOUD, AmbientData.classifyIcon(""));
+    assertEquals(AmbientData.WeatherIcon.CLOUD, AmbientData.classifyIcon(null));
+    assertEquals(AmbientData.WeatherIcon.RAIN, AmbientData.classifyIcon("小雨"));
+    assertEquals(AmbientData.WeatherIcon.RAIN, AmbientData.classifyIcon("雷阵雨"));
+    assertEquals(AmbientData.WeatherIcon.SNOW, AmbientData.classifyIcon("小雪"));
+    // Snow wins over the rain word it combines with, rain over a bare 晴.
+    assertEquals(AmbientData.WeatherIcon.SNOW, AmbientData.classifyIcon("雨夹雪"));
+    assertEquals(AmbientData.WeatherIcon.FOG, AmbientData.classifyIcon("雾"));
+    assertEquals(AmbientData.WeatherIcon.FOG, AmbientData.classifyIcon("霾"));
+  }
+
+  @Test
+  public void forecastRangeTextDegrades() {
+    assertEquals("12° / -2°", AmbientRepository.forecastRangeText(12, -2));
+    assertEquals("12°", AmbientRepository.forecastRangeText(12, null));
+    assertEquals("-2°", AmbientRepository.forecastRangeText(null, -2));
+    assertEquals("", AmbientRepository.forecastRangeText(null, null));
   }
 
   @Test
