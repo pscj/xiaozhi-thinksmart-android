@@ -183,11 +183,25 @@ final class AmbientView extends FrameLayout {
     infoLayer = new LinearLayout(context);
     infoLayer.setOrientation(LinearLayout.VERTICAL);
     infoLayer.setPadding(dp(48), dp(INFO_PAD_TOP_DP), dp(48), dp(WAKE_BAR_H + 4));
+    // The clock lift (see alignClockBlock) pulls the clock column above the top
+    // row's frame — which is also above this layer's padding box. A ViewGroup
+    // clips its children's drawing to that box by default, so the lifted clock
+    // glyphs were shaved at exactly that line: the row clips first-hand, and
+    // this layer would clip at the same line even if the row did not. Growing
+    // the top padding (the first attempted fix) only moved the whole row down
+    // the panel — the cut is measured from the row, not the panel edge, so it
+    // never changed. Neither the layer nor the row may clip; the first clip
+    // left above them is the panel edge itself, and alignClockBlock's padding
+    // formula keeps the lifted ink physically clear of it.
+    infoLayer.setClipChildren(false);
+    infoLayer.setClipToPadding(false);
     addView(infoLayer, new FrameLayout.LayoutParams(-1, -1));
 
     LinearLayout top = new LinearLayout(context);
     top.setOrientation(LinearLayout.HORIZONTAL);
     top.setGravity(Gravity.TOP);
+    top.setClipChildren(false);
+    top.setClipToPadding(false);
     infoLayer.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
     // The clock block: taller than the weather side it shares the top row with (the
@@ -919,14 +933,20 @@ final class AmbientView extends FrameLayout {
       lp.topMargin = margin;
       leftCol.setLayoutParams(lp);
     }
-    // The lift is a negative margin: it pulls the block above the info layer's top
-    // padding, and whatever passes the layer's own top edge is clipped by the parent
-    // — on the real panel the lift (~26 dp) exceeded the padding (20 dp) and shaved
-    // the clock glyphs' tops off. Keep physical room for the lift: the layer's top
-    // padding grows to the lift plus headroom (which also covers the burn-in nudge's
-    // upward steps). Both columns sit in the same row under that padding, so the
-    // bottom alignment between them is untouched; the few dp come out of the
-    // weighted news region.
+    // The lift is a negative margin: it pulls the block above the top row's frame
+    // (and the layer's padding box, which shares that top line). Those groups no
+    // longer clip — see the constructor — because they, not the layer's top edge,
+    // were what shaved the clock glyphs: the cut was the lift minus the font's
+    // internal top offset, identical at any padding (a padding-only fix was tried
+    // and changed nothing on the real panel). What the padding is still needed
+    // for is physical clearance to the panel edge, the first clip left above:
+    // with the padding at the lift plus headroom, the block's top edge — and the
+    // ink, which starts at or below it — sits that headroom below the panel top,
+    // and the headroom also covers the burn-in nudge's upward steps, so the ink
+    // keeps at least CLOCK_HEADROOM_DP − 3 dp of clearance at the cycle's highest
+    // step. Both columns sit in the same row under that padding, so the bottom
+    // alignment between them is untouched; the few dp come out of the weighted
+    // news region.
     int padTopPx = Math.max(dp(INFO_PAD_TOP_DP), shiftPx + dp(CLOCK_HEADROOM_DP));
     if (infoLayer.getPaddingTop() != padTopPx) {
       infoLayer.setPadding(
