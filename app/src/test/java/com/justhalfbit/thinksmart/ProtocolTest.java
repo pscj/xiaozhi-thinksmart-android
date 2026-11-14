@@ -21,6 +21,24 @@ public class ProtocolTest {
   }
 
   @Test
+  public void sleepWindowBoundaryPoints() {
+    // Cross-midnight 22:00-07:00: the start point itself is inside, the end
+    // point itself is already outside (the morning restore relies on this).
+    assertTrue(Protocol.inSleep(22 * 60, 22 * 60, 7 * 60));
+    assertFalse(Protocol.inSleep(21 * 60 + 59, 22 * 60, 7 * 60));
+    assertTrue(Protocol.inSleep(6 * 60 + 59, 22 * 60, 7 * 60));
+    assertFalse(Protocol.inSleep(7 * 60, 22 * 60, 7 * 60));
+    assertFalse(Protocol.inSleep(7 * 60 + 1, 22 * 60, 7 * 60));
+    // Same-day 10:00-14:00: same start-in / end-out convention.
+    assertTrue(Protocol.inSleep(10 * 60, 10 * 60, 14 * 60));
+    assertFalse(Protocol.inSleep(9 * 60 + 59, 10 * 60, 14 * 60));
+    assertTrue(Protocol.inSleep(13 * 60 + 59, 10 * 60, 14 * 60));
+    // A zero-length window (start == end) counts as all day.
+    assertTrue(Protocol.inSleep(3 * 60, 8 * 60, 8 * 60));
+    assertTrue(Protocol.inSleep(8 * 60, 8 * 60, 8 * 60));
+  }
+
+  @Test
   public void timeAndPercent() {
     assertEquals(1439, Protocol.minutes("23:59"));
     assertEquals(0, Protocol.percent(-4));

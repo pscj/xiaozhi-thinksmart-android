@@ -74,6 +74,10 @@ public class VoiceService extends Service {
           if (quiet != lastQuiet) {
             lastQuiet = quiet;
             refreshReports(false);
+            // Leaving the sleep window: if the display blanked overnight, the
+            // activity is stopped behind its black curtain and nothing else
+            // would ever lift it — wake the screen and bring it forward.
+            if (!quiet) wakeScreenAfterSleep();
           }
           if (SystemClock.elapsedRealtime() - lastForegroundSync >= 15000) {
             lastForegroundSync = SystemClock.elapsedRealtime();
@@ -1209,6 +1213,29 @@ public class VoiceService extends Service {
             } catch (RuntimeException ignored) {
               /* The ROM may require the notification to open the app. */
             }
+          }
+        });
+  }
+
+  /** The sleep window just ended: relight a display that blanked overnight. */
+  private void wakeScreenAfterSleep() {
+    main.post(
+        () -> {
+          if (destroyed) return;
+          PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+          if (pm.isInteractive()) return;
+          PowerManager.WakeLock screen =
+              pm.newWakeLock(
+                  PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                  "thinksmart:sleep-restore");
+          screen.acquire(3000);
+          try {
+            startActivity(
+                new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra("sleepRestore", true));
+          } catch (RuntimeException ignored) {
+            /* The ROM may require the notification to open the app. */
           }
         });
   }

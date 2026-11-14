@@ -23,6 +23,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       binding,
       visible,
       black,
+      blackForSleep,
       active,
       restoringTouch,
       microphoneHeld,
@@ -60,6 +61,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private AmbientView ambient;
   private EditText input;
   private static final long AMBIENT_IDLE_MS = 60_000L;
+  private static final long BLACK_RECHECK_MS = 30_000L;
   private static final String AMBIENT_MODE_PREF = "ambientMode";
   private String rendered = "";
   private Boolean lastConversationStyle, lastAbortStyle;
@@ -96,11 +98,56 @@ public class MainActivity extends Activity implements VoiceService.Listener {
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
-              active || overlayOpen || (ambientUp && !sleeping))) setBlack(true);
+              active || overlayOpen || (ambientUp && !sleeping))) {
+            // Remember whether this black-out belongs to the sleep window: only
+            // that kind is lifted automatically once the window ends. A daytime
+            // idle black-out still waits for a touch, as before.
+            blackForSleep = sleeping;
+            setBlack(true);
+          }
           updateAmbient(now);
           ui.postDelayed(this, 1000);
         }
       };
+  private final Runnable blackRecheck =
+      new Runnable() {
+        public void run() {
+          if (!black || !blackForSleep) return;
+          if (!inSleepWindowNow()) {
+            restoreFromBlack();
+            return;
+          }
+          ui.postDelayed(this, BLACK_RECHECK_MS);
+        }
+      };
+
+  /** The same window test VoiceService.sleeping() applies, from local prefs. */
+  private boolean inSleepWindowNow() {
+    Calendar c = Calendar.getInstance();
+    return prefs.getBoolean("sleep", false)
+        && Protocol.inSleep(
+            c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE),
+            Protocol.minutes(prefs.getString("sleepStart", "22:00")),
+            Protocol.minutes(prefs.getString("sleepEnd", "07:00")));
+  }
+
+  /** The sleep window has ended: lift the curtain and return to the standby screen. */
+  private void restoreFromBlack() {
+    blackForSleep = false;
+    if (black) setBlack(false);
+    // Backdate the idle clock so the standby screen returns at once instead of
+    // after another idle minute.
+    lastInteraction = SystemClock.elapsedRealtime() - AMBIENT_IDLE_MS;
+    PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+    if (pm != null && !pm.isInteractive()) {
+      PowerManager.WakeLock screen =
+          pm.newWakeLock(
+              PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+              "thinksmart:sleep-restore");
+      screen.acquire(3000);
+    }
+    if (visible) updateAmbient(SystemClock.elapsedRealtime());
+  }
 
   /**
    * After 60 s without a conversation or touch, show only the selected standby mode.
@@ -633,6 +680,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     super.onNewIntent(intent);
     setIntent(intent);
     if (intent.getBooleanExtra("voiceWake", false)) touch();
+    if (intent.getBooleanExtra("sleepRestore", false)) restoreFromBlack();
   }
 
   @Override
@@ -1063,6 +1111,13 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     curtain.setVisibility(value ? View.VISIBLE : View.GONE);
     orb.setVisibility(value ? View.INVISIBLE : View.VISIBLE);
     applyBrightness();
+    // While the curtain is up the activity is stopped and the tick no longer
+    // runs; keep a slow re-check alive so a sleep-window black-out is lifted
+    // once the window ends instead of waiting for a touch that may never come.
+    // (The service's partial wake lock keeps this handler fed overnight.)
+    ui.removeCallbacks(blackRecheck);
+    if (value) ui.postDelayed(blackRecheck, BLACK_RECHECK_MS);
+    else blackForSleep = false;
   }
 
   @Override
