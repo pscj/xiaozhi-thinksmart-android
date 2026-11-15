@@ -5,4 +5,6 @@
         android:targetPackage="com.justhalfbit.thinksmart" android:label="主界面交互回归"/>
     <instrumentation android:name="com.justhalfbit.thinksmart.MuseBleRunner"
         android:targetPackage="com.justhalfbit.thinksmart" android:label="Muse BLE 回归"/>
+    <instrumentation android:name="com.justhalfbit.thinksmart.SleepDisplayRunner"
+        android:targetPackage="com.justhalfbit.thinksmart" android:label="睡眠屏幕恢复回归"/>
 </manifest>

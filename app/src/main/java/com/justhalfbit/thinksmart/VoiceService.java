@@ -18,6 +18,7 @@ public class VoiceService extends Service {
   public interface Listener {
     void update(Snapshot snapshot);
     void showVolume(int volume);
+    default void restoreAfterSleep() {}
   }
 
   public static final class Snapshot {
@@ -1259,12 +1260,19 @@ public class VoiceService extends Service {
         () -> {
           if (destroyed) return;
           PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-          if (pm.isInteractive()) return;
-          PowerManager.WakeLock screen =
-              pm.newWakeLock(
-                  PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                  "thinksmart:sleep-restore");
-          screen.acquire(3000);
+          if (!pm.isInteractive()) {
+            PowerManager.WakeLock screen =
+                pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "thinksmart:sleep-restore");
+            screen.acquire(3000);
+          }
+          // The app's black curtain can be up while Android is still interactive.
+          Listener current = listener;
+          if (current != null) {
+            current.restoreAfterSleep();
+            return;
+          }
           try {
             startActivity(
                 new Intent(this, MainActivity.class)

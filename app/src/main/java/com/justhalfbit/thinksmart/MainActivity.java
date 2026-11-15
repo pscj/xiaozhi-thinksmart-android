@@ -85,6 +85,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       new Runnable() {
         public void run() {
           if (!visible) return;
+          reconcileSleepBlackout();
           updateClock();
           applyBrightness();
           long now = SystemClock.elapsedRealtime();
@@ -93,16 +94,12 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           // Exception: inside the sleep window the ambient screen no longer
           // holds the black-out off, so the display can still blank overnight.
           boolean ambientUp = ambient != null && ambient.isShowing();
-          boolean sleeping = snapshot != null && snapshot.sleeping;
+          boolean sleeping = inSleepWindowNow();
           if (Protocol.idleExpired(
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
               active || overlayOpen || (ambientUp && !sleeping))) {
-            // Remember whether this black-out belongs to the sleep window: only
-            // that kind is lifted automatically once the window ends. A daytime
-            // idle black-out still waits for a touch, as before.
-            blackForSleep = sleeping;
             setBlack(true);
           }
           updateAmbient(now);
@@ -112,14 +109,19 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private final Runnable blackRecheck =
       new Runnable() {
         public void run() {
-          if (!black || !blackForSleep) return;
-          if (!inSleepWindowNow()) {
-            restoreFromBlack();
-            return;
-          }
-          ui.postDelayed(this, BLACK_RECHECK_MS);
+          if (!black) return;
+          reconcileSleepBlackout();
+          if (black) ui.postDelayed(this, BLACK_RECHECK_MS);
         }
       };
+
+  private void reconcileSleepBlackout() {
+    if (!black) return;
+    // A daytime idle blackout can remain in place when the sleep window starts.
+    // Keep its sleep ownership until restoration, even after the window ends.
+    if (inSleepWindowNow()) blackForSleep = true;
+    else if (blackForSleep) restoreAfterSleep();
+  }
 
   /** The same window test VoiceService.sleeping() applies, from local prefs. */
   private boolean inSleepWindowNow() {
@@ -132,9 +134,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   }
 
   /** The sleep window has ended: lift the curtain and return to the standby screen. */
-  private void restoreFromBlack() {
+  @Override
+  public void restoreAfterSleep() {
     blackForSleep = false;
     if (black) setBlack(false);
+    applyBrightness();
     // Backdate the idle clock so the standby screen returns at once instead of
     // after another idle minute.
     lastInteraction = SystemClock.elapsedRealtime() - AMBIENT_IDLE_MS;
@@ -680,7 +684,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     super.onNewIntent(intent);
     setIntent(intent);
     if (intent.getBooleanExtra("voiceWake", false)) touch();
-    if (intent.getBooleanExtra("sleepRestore", false)) restoreFromBlack();
+    if (intent.getBooleanExtra("sleepRestore", false)) {
+      intent.removeExtra("sleepRestore");
+      restoreAfterSleep();
+    }
   }
 
   @Override
@@ -1107,6 +1114,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private void setBlack(boolean value) {
     if (black == value) return;
     black = value;
+    if (value) blackForSleep = inSleepWindowNow();
     if (value && ambient != null && ambient.isShowing()) ambient.hide();
     curtain.setVisibility(value ? View.VISIBLE : View.GONE);
     orb.setVisibility(value ? View.INVISIBLE : View.VISIBLE);
@@ -1145,7 +1153,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
             ? .01f
             : Math.max(
                 .02f,
-                (snapshot != null && snapshot.sleeping
+                (inSleepWindowNow()
                         ? 10
                         : Protocol.percent(prefs.getInt("brightness", 80)))
                     / 100f);
@@ -1219,7 +1227,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   protected void onStart() {
     super.onStart();
     visible = true;
-    touch();
+    if (getIntent().getBooleanExtra("sleepRestore", false)
+        || (blackForSleep && !inSleepWindowNow())) {
+      getIntent().removeExtra("sleepRestore");
+      restoreAfterSleep();
+    } else touch();
     startVoice();
     ui.post(tick);
   }
