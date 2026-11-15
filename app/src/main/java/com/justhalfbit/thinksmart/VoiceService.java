@@ -67,6 +67,7 @@ public class VoiceService extends Service {
   private long lastForegroundSync;
   private WakeMatcher wakeMatcher;
   private boolean wakePending, botStarted, wakeGreetingPending, reportsPending;
+  private boolean replyListening, stopWordsSupported;
   private final ArrayDeque<byte[]> wakeBacklog = new ArrayDeque<>();
   private final Runnable managementTick =
       new Runnable() {
@@ -425,7 +426,8 @@ public class VoiceService extends Service {
                                     "transport",
                                     "websocket",
                                     "features",
-                                    json("mcp", true, "vad_end", true, "ready_on_tts_start", true, "muse_pair", true),
+                                    json("mcp", true, "vad_end", true, "ready_on_tts_start", true,
+                                        "muse_pair", true, "speech_interrupt", interruptionMode()),
                                     "audio_params",
                                     json(
                                         "format",
@@ -500,6 +502,7 @@ public class VoiceService extends Service {
     socket = null;
     if (old != null) old.cancel();
     ready = uploading = false;
+    replyListening = stopWordsSupported = false;
     acceptTurn = false;
     muted = true;
     turn++;
@@ -559,11 +562,13 @@ public class VoiceService extends Service {
           acceptTurn = false;
           muted = true;
           uploading = keepListening;
+          replyListening = false;
           audio.clear();
           io.removeCallbacks(listenTimeout);
           if (send(json("type", "abort", "played_ms", played))) awaitAbort();
           // Interrupting does not initiate a new recording; preserve an already open mic only.
           if (keepListening) {
+            wantsListen = !interruptionMode().equals("any");
             uploading = acceptTurn = true;
             setState("聆听中");
             io.postDelayed(listenTimeout, LISTEN_IDLE_TIMEOUT_MS);
@@ -661,6 +666,7 @@ public class VoiceService extends Service {
       wantsListen = false;
       return;
     }
+    replyListening = false;
     if (wakeGreetingPending) {
       wakeGreetingPending = false;
       wantsListen = false;
@@ -694,10 +700,25 @@ public class VoiceService extends Service {
   }
 
   private void listenDuringReply() {
-    if (manual || uploading) return;
+    if (manual) return;
+    boolean wasReply = replyListening;
+    replyListening = true;
+    String mode = interruptionMode();
+    if (mode.equals("off") || (mode.equals("keywords") && !stopWordsSupported)) {
+      // Pause uploads only: local wake-word detection must remain active.
+      // Do not send listen/stop, which would submit buffered playback echo to ASR.
+      uploading = false;
+      return;
+    }
+    if (uploading && (wasReply || mode.equals("any"))) return;
     // Keep the microphone stream open through TTS; server VAD/ASR handles barge-in.
     uploading = true;
-    send(json("type", "listen", "state", "start", "mode", "realtime"));
+    send(json("type", "listen", "state", "start", "mode", "realtime", "purpose", "interrupt"));
+  }
+
+  private String interruptionMode() {
+    String mode = prefs.getString("speechInterruptMode", "keywords");
+    return mode.equals("any") || mode.equals("off") ? mode : "keywords";
   }
 
   public void end() {
@@ -720,6 +741,7 @@ public class VoiceService extends Service {
 
   private void endInternal() {
     cancelVerification();
+    replyListening = false;
     botStarted = false;
     if (state.equals("回复中")) {
       chats.markInterrupted(threadEntry);
@@ -798,8 +820,12 @@ public class VoiceService extends Service {
       audio.configure(rate);
       abortUntil = 0;
       session = msg.optString("session_id");
+      JSONObject features = msg.optJSONObject("features");
+      stopWordsSupported = features != null && features.optBoolean("speech_interrupt");
+      replyListening = false;
       ready = true;
-      error = "";
+      error = interruptionMode().equals("keywords") && !stopWordsSupported
+          ? "网关尚不支持停止词打断，请更新网关；当前可用按钮或唤醒词打断" : "";
       muted = false;
       syncManagement();
       setState("待机");
@@ -841,11 +867,14 @@ public class VoiceService extends Service {
         turn++;
         message("你", t);
         muted = false;
+        listenDuringReply();
         io.removeCallbacks(listenTimeout);
         refreshModels();
         setState("思考中");
       }
     } else if (type.equals("vad")) {
+      // A queued VAD result must not reopen the listening window during a reply.
+      if (!manual && replyListening && !interruptionMode().equals("any")) return;
       if (phase.equals("end")) {
         setState("识别中");
         io.removeCallbacks(listenTimeout);
@@ -879,6 +908,11 @@ public class VoiceService extends Service {
           audio.clear();
           chats.markInterrupted(threadEntry);
           saveChats();
+          if (msg.optString("reason").equals("stop_word")) {
+            turn++;
+            beginListen();
+            return;
+          }
         }
         audio.drained(
             () ->
@@ -889,7 +923,7 @@ public class VoiceService extends Service {
                         refreshHistory();
                         refreshReports(false);
                         manual = false;
-                        if (uploading) {
+                        if (uploading && interruptionMode().equals("any")) {
                           // Do not reset the server ASR buffer: the user may already be speaking.
                           if (state.equals("回复中") || state.equals("思考中")) {
                             listenStarted = SystemClock.elapsedRealtime();

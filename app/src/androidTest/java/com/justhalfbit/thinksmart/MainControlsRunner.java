@@ -103,6 +103,7 @@ public final class MainControlsRunner extends Instrumentation {
         passed++;
       }
       try (Harness h = new Harness()) {
+        h.service.settings().edit().putString("speechInterruptMode", "any").commit();
         h.set("wakeGreetingPending", true);
         h.call("beginListen");
         h.check(h.count("listen", "detect") == 1 && h.count("listen", "start") == 1,
@@ -122,6 +123,51 @@ public final class MainControlsRunner extends Instrumentation {
         passed++;
       }
       try (Harness h = new Harness()) {
+        h.service.settings().edit().putString("speechInterruptMode", "off").commit();
+        h.set("wakeGreetingPending", true);
+        h.call("beginListen"); h.frame();
+        h.check(h.socket.frames == 0 && h.count("listen", "start") == 0,
+            "关闭语音打断时，唤醒问候不能开启音频上传");
+        h.json(new JSONObject().put("type", "tts").put("state", "start"));
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "我在，请说"));
+        h.frame();
+        h.check(h.socket.frames == 0, "关闭自然插话时，播报中不能上传");
+        h.json(new JSONObject().put("type", "vad").put("state", "empty"));
+        h.check("回复中".equals(h.get("state")), "迟到的空识别不能把播报改成聆听");
+        h.json(new JSONObject().put("type", "tts").put("state", "stop"));
+        h.check(!Boolean.TRUE.equals(h.get("uploading")), "服务端发完音频不能提前恢复收音");
+        h.completePlayback(); h.frame();
+        h.check("聆听中".equals(h.get("state")) && h.socket.frames == 1,
+            "本地实际播完后应恢复聆听和上传");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.service.settings().edit().putString("speechInterruptMode", "off").commit();
+        h.service.wake(); h.drain(); h.frame();
+        h.check(h.socket.frames == 1, "关闭自然插话不能影响正常提问");
+        h.json(new JSONObject().put("type", "stt").put("text", "测试提问")); h.frame();
+        h.check(h.socket.frames == 1 && "思考中".equals(h.get("state")), "识别出问题后应暂停上传");
+        h.json(new JSONObject().put("type", "tts").put("state", "start")); h.frame();
+        h.check(h.socket.frames == 1, "TTS开始不能重新开启上传");
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "测试回答"));
+        h.localWake();
+        h.check(h.count("abort", "") == 1, "关闭自然插话后唤醒词仍可打断");
+        h.ack(); h.frame();
+        h.check(h.count("listen", "detect") == 1 && h.socket.frames == 1,
+            "重新唤醒应通知问候，等待播完再上传");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.service.settings().edit().putString("speechInterruptMode", "off").commit();
+        h.set("acceptTurn", true); h.set("uploading", true); h.set("muted", false);
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "主动播报"));
+        h.frame();
+        h.check(h.socket.frames == 0, "没有TTS/start的主动播报也应停止上传");
+        h.service.abort(); h.drain(); h.ack();
+        h.check("待机".equals(h.get("state")), "关闭自然插话后按钮仍可停止播报");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
         h.set("acceptTurn", true); h.set("manual", true);
         h.json(new JSONObject().put("type", "tts").put("state", "start")); h.frame();
         h.check(h.socket.frames == 0 && h.count("listen", "start") == 0, "手动模式播放不能自动收音");
@@ -137,6 +183,7 @@ public final class MainControlsRunner extends Instrumentation {
       }
       try (Harness h = new Harness()) {
         h.set("state", "聆听中"); h.set("uploading", true);
+        h.service.settings().edit().putString("speechInterruptMode", "any").commit();
         h.localWake();
         h.check(h.count("abort", "") == 1, "聆听上传中再次唤醒必须先取消旧识别");
         h.localWake();
@@ -166,11 +213,62 @@ public final class MainControlsRunner extends Instrumentation {
         passed++;
       }
       try (Harness h = new Harness()) {
+        h.service.settings().edit().putString("speechInterruptMode", "any").commit();
         h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "主动播报"));
         h.frame();
         h.check(h.socket.frames == 1 && h.count("listen", "start") == 1, "没有tts/start的播报也允许插话");
         h.service.micMuted = true; h.frame();
         h.check(h.socket.frames == 1, "实体静音时不能上传");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.service.wake(); h.drain();
+        h.json(new JSONObject().put("type", "stt").put("text", "测试提问"));
+        h.frame();
+        h.check(h.socket.frames == 1 && Boolean.TRUE.equals(h.get("replyListening")),
+            "默认停止词模式在思考期间必须保持指令收音");
+        h.json(new JSONObject().put("type", "vad").put("state", "end"));
+        h.check("思考中".equals(h.get("state")), "指令收音不能覆盖思考状态");
+        h.json(new JSONObject().put("type", "tts").put("state", "start"));
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "测试回答"));
+        h.frame();
+        h.json(new JSONObject().put("type", "vad").put("state", "empty"));
+        h.check("回复中".equals(h.get("state")) && h.socket.frames == 2,
+            "停止词模式在播报期间保持上传，忽略非问题的VAD状态");
+        h.json(new JSONObject().put("type", "tts").put("state", "stop")
+            .put("interrupted", true).put("reason", "stop_word"));
+        h.check("聆听中".equals(h.get("state")) && !Boolean.TRUE.equals(h.get("replyListening")),
+            "停止词确认必须立即停止播放并恢复正常聆听");
+        h.check(((ChatLog) h.get("chats")).array("default").length() == 2,
+            "停止词不能新增聊天问题");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.set("wakeGreetingPending", true); h.call("beginListen");
+        h.json(new JSONObject().put("type", "tts").put("state", "start"));
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "请说"));
+        int starts = h.count("listen", "start");
+        h.json(new JSONObject().put("type", "tts").put("state", "stop"));
+        h.check(Boolean.TRUE.equals(h.get("replyListening")), "发送结束不等于本地播放结束");
+        h.completePlayback();
+        h.check(h.count("listen", "start") == starts + 1 && !Boolean.TRUE.equals(h.get("replyListening")),
+            "停止词模式播完必须通知服务端从指令收音恢复正常提问");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.json(new JSONObject().put("type", "hello").put("session_id", "old-gateway"));
+        h.service.wake(); h.drain();
+        h.json(new JSONObject().put("type", "stt").put("text", "测试提问")); h.frame();
+        h.check(h.socket.frames == 0 && ((String) h.get("error")).contains("停止词"),
+            "旧网关不支持停止词时必须提示并暂停回答期间上传");
+        passed++;
+      }
+      try (Harness h = new Harness()) {
+        h.set("acceptTurn", true); h.set("muted", false);
+        h.json(new JSONObject().put("type", "tts").put("state", "sentence_start").put("text", "测试回答"));
+        h.service.abort(); h.drain(); h.ack();
+        h.check("聆听中".equals(h.get("state")) && !Boolean.TRUE.equals(h.get("replyListening")),
+            "停止词模式按钮打断后必须恢复正常问题收音");
         passed++;
       }
       try (Harness h = new Harness()) {
@@ -214,10 +312,12 @@ public final class MainControlsRunner extends Instrumentation {
       thread.start(); handler = new Handler(thread.getLooper());
       set("io", handler);
       set("prefs", getTargetContext().getSharedPreferences("main-controls-test", Context.MODE_PRIVATE));
+      service.settings().edit().clear().commit();
       set("chats", new ChatLog("{}"));
       set("chatDevice", "test");
       set("audio", new AudioEngine(getTargetContext(), null));
       set("socket", socket); set("ready", true);
+      set("stopWordsSupported", true);
     }
     Object get(String name) throws Exception { Field f = VoiceService.class.getDeclaredField(name); f.setAccessible(true); return f.get(service); }
     void set(String name, Object value) throws Exception { Field f = VoiceService.class.getDeclaredField(name); f.setAccessible(true); f.set(service, value); }
@@ -252,6 +352,21 @@ public final class MainControlsRunner extends Instrumentation {
       handler.post(task); task.get(5, TimeUnit.SECONDS);
     }
     void ack() throws Exception { json(new JSONObject().put("type", "tts").put("state", "stop").put("interrupted", true)); }
+    void completePlayback() throws Exception {
+      Field queueField = AudioEngine.class.getDeclaredField("queue");
+      queueField.setAccessible(true);
+      Queue<?> queue = (Queue<?>) queueField.get(get("audio"));
+      Object packet;
+      boolean completed = false;
+      while ((packet = queue.poll()) != null) {
+        Field drainedField = packet.getClass().getDeclaredField("drained");
+        drainedField.setAccessible(true);
+        Runnable drained = (Runnable) drainedField.get(packet);
+        if (drained != null) { drained.run(); completed = true; }
+      }
+      check(completed, "缺少播放完成回调");
+      drain();
+    }
     int count(String type, String state) throws Exception {
       int count = 0;
       for (String value : socket.messages) {
