@@ -13,6 +13,8 @@ import org.json.*;
 
 /** One serial owner for protocol state; hardware audio lives on dedicated threads. */
 public class VoiceService extends Service {
+  private static final long LISTEN_IDLE_TIMEOUT_MS = 5000;
+
   public interface Listener {
     void update(Snapshot snapshot);
     void showVolume(int volume);
@@ -282,7 +284,7 @@ public class VoiceService extends Service {
         io.removeCallbacks(listenTimeout);
         io.postDelayed(
             listenTimeout,
-            Math.max(0, Math.min(10000, listenStarted + 60000 - now)));
+            Math.max(0, Math.min(LISTEN_IDLE_TIMEOUT_MS, listenStarted + 60000 - now)));
       }
     }
     boolean allowed = ready
@@ -564,7 +566,7 @@ public class VoiceService extends Service {
           if (keepListening) {
             uploading = acceptTurn = true;
             setState("聆听中");
-            io.postDelayed(listenTimeout, 10000);
+            io.postDelayed(listenTimeout, LISTEN_IDLE_TIMEOUT_MS);
           } else setState("待机");
         });
   }
@@ -688,7 +690,7 @@ public class VoiceService extends Service {
     setState("聆听中");
     flushWakeBacklog();
     io.removeCallbacks(listenTimeout);
-    io.postDelayed(listenTimeout, manual ? 60000 : 10000);
+    io.postDelayed(listenTimeout, manual ? 60000 : LISTEN_IDLE_TIMEOUT_MS);
   }
 
   private void listenDuringReply() {
@@ -854,7 +856,7 @@ public class VoiceService extends Service {
         } else {
           setState("聆听中");
           io.removeCallbacks(listenTimeout);
-          io.postDelayed(listenTimeout, 10000);
+          io.postDelayed(listenTimeout, LISTEN_IDLE_TIMEOUT_MS);
         }
       }
     } else if (type.equals("tts")) {
@@ -893,7 +895,7 @@ public class VoiceService extends Service {
                             listenStarted = SystemClock.elapsedRealtime();
                             setState("聆听中");
                             io.removeCallbacks(listenTimeout);
-                            io.postDelayed(listenTimeout, 10000);
+                            io.postDelayed(listenTimeout, LISTEN_IDLE_TIMEOUT_MS);
                           }
                         } else beginListen();
                       }
