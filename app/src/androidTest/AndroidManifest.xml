@@ -7,4 +7,6 @@
         android:targetPackage="com.justhalfbit.thinksmart" android:label="Muse BLE 回归"/>
     <instrumentation android:name="com.justhalfbit.thinksmart.SleepDisplayRunner"
         android:targetPackage="com.justhalfbit.thinksmart" android:label="睡眠屏幕恢复回归"/>
+    <instrumentation android:name="com.justhalfbit.thinksmart.PhotoFrameRunner"
+        android:targetPackage="com.justhalfbit.thinksmart" android:label="远程相框回归"/>
 </manifest>

@@ -4,18 +4,22 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.ExifInterface;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.util.TypedValue;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -37,6 +41,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
+import okhttp3.Call;
 
 /**
  * The ambient (standby) face: an information screen that takes over the kiosk when nothing is
@@ -52,15 +57,15 @@ import java.util.function.Supplier;
  * minute against the same-colour background (burn-in). Night dimming stays the activity's job
  * (its sleep-window brightness covers this view too, since it lives in the same window).
  *
- * <p>Photos come from a {@code photos/} folder in the app's external files dir
- * (Android/data/com.justhalfbit.thinksmart/files/photos) — put .jpg/.png/.webp files there;
- * with no photos the frame mode displays an empty-state hint.
+ * <p>The photo frame downloads random originals from {@link RemotePhotoRepository#DEFAULT_URL}.
+ * One next image is prefetched while the current image stays visible for at least five minutes.
+ * A late or failed request never clears the current image. The last displayed image is cached.
  *
  * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
  * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
  * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — the same four
- * scenic photos the web prototype used, rotating the same way. The photo frame mode is
- * unaffected: it still shows its pictures full-screen at full brightness above everything.
+ * scenic photos the web prototype used, rotating the same way. These information-screen
+ * sources are independent of the remote photo frame.
  */
 final class AmbientView extends FrameLayout {
 
@@ -76,7 +81,9 @@ final class AmbientView extends FrameLayout {
   private final View bgScrim;
   private final LinearLayout infoLayer;
   private final FrameLayout photoLayer;
-  private final TextView timeText, dateText, wxCity, wxFallback, newsTag, photoClock;
+  private final TextView timeText, dateText, wxCity, wxFallback, newsTag, photoClock, photoDate;
+  private final LinearLayout photoClockBlock;
+  private final View photoShade;
   private final LinearLayout leftCol;
   private final LinearLayout wxCluster;
   private final WeatherIconView wxIcon;
@@ -94,7 +101,7 @@ final class AmbientView extends FrameLayout {
   private final LinearLayout dressRows;
   private final LinearLayout wakeBar;
   private final TextView wakeText;
-  private final ImageView photoA, photoB;
+  private final ImageView photoA, photoB, photoFallback;
   private final TextView photoEmpty;
 
   private final Handler ui = new Handler(Looper.getMainLooper());
@@ -118,14 +125,8 @@ final class AmbientView extends FrameLayout {
         }
       };
   private final Runnable photoTick =
-      new Runnable() {
-        public void run() {
-          if (!isShowing() || mode != Mode.PHOTO || photoFiles.isEmpty()) return;
-          photoIndex = (photoIndex + 1) % photoFiles.size();
-          showPhoto(photoIndex);
-          ui.postDelayed(this, PHOTO_MS);
-        }
-      };
+      this::advancePhotoIfReady;
+  private final Runnable photoRetry = this::prefetchPhoto;
   private final Runnable bgTick =
       new Runnable() {
         public void run() {
@@ -143,8 +144,16 @@ final class AmbientView extends FrameLayout {
   private Supplier<String> wakePhrase;
   private long lastWeatherFetchMs, lastNewsFetchMs;
 
-  private List<File> photoFiles = new ArrayList<>();
-  private int photoIndex;
+  private RemotePhotoRepository remotePhotos;
+  private Call photoCall;
+  private boolean photoLoading;
+  private boolean photoPrepared, fallbackLoading;
+  private Bitmap fallbackBitmap;
+  private long photoDownloadedBytes;
+  private int photoGeneration;
+  private long photoDueAt;
+  private Bitmap pendingPhoto, retiringPhoto;
+  private File pendingPhotoFile;
   /** The "tomorrow" the dressing panel currently shows; rebuilt when the date rolls over. */
   private LocalDate dressDate;
   /** The last news feed rendered; re-rendered when the news list's height changes. */
@@ -163,6 +172,7 @@ final class AmbientView extends FrameLayout {
 
   AmbientView(Context context) {
     super(context);
+    remotePhotos = RemotePhotoRepository.forApp(new File(context.getFilesDir(), "photo-frame"));
     setBackgroundColor(0xff050813);
     setVisibility(GONE);
 
@@ -411,20 +421,72 @@ final class AmbientView extends FrameLayout {
     photoLayer = new FrameLayout(context);
     photoLayer.setVisibility(GONE);
     addView(photoLayer, new FrameLayout.LayoutParams(-1, -1));
+    photoFallback = photoImage(context);
+    photoLayer.addView(photoFallback, new FrameLayout.LayoutParams(-1, -1));
     photoA = photoImage(context);
     photoB = photoImage(context);
     photoLayer.addView(photoA, new FrameLayout.LayoutParams(-1, -1));
     photoLayer.addView(photoB, new FrameLayout.LayoutParams(-1, -1));
-    photoEmpty = text("暂无照片\n添加本地照片后可在此轮播", 22, 0xffb6c0e2);
+    photoEmpty = text("正在后台下载照片…", 14, 0xfff4f6fa);
     photoEmpty.setGravity(Gravity.CENTER);
+    photoEmpty.setShadowLayer(dp(2), 0, dp(1), 0x99000000);
+    photoEmpty.setPadding(dp(16), dp(9), dp(16), dp(9));
+    GradientDrawable loadingBackground = new GradientDrawable();
+    loadingBackground.setColor(0x66000000);
+    loadingBackground.setCornerRadius(dp(18));
+    photoEmpty.setBackground(loadingBackground);
     photoEmpty.setVisibility(GONE);
-    photoLayer.addView(photoEmpty, new FrameLayout.LayoutParams(-1, -1));
-    photoClock = text("", 30, 0xffffffff);
-    photoClock.setShadowLayer(dp(3), 0, dp(1), 0xaa000000);
-    photoClock.setPadding(dp(28), 0, 0, dp(24));
+    FrameLayout.LayoutParams loadingParams = new FrameLayout.LayoutParams(-2, -2,
+        Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    loadingParams.topMargin = dp(20);
+    photoLayer.addView(photoEmpty, loadingParams);
+    photoShade = new View(context);
+    photoShade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        new int[] {0x00000000, 0x19000000, 0x70000000}));
+    photoLayer.addView(photoShade, new FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM));
+    photoClockBlock = new LinearLayout(context);
+    photoClockBlock.setOrientation(LinearLayout.VERTICAL);
+    photoClockBlock.setGravity(Gravity.CENTER_HORIZONTAL);
+    photoClockBlock.setPadding(dp(20), 0, dp(20), 0);
+    photoClock = text("", 100, 0xfffafbff);
+    photoClock.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    photoClock.setGravity(Gravity.CENTER);
+    photoClock.setIncludeFontPadding(false);
+    photoClock.setSingleLine(true);
+    photoClock.setLetterSpacing(-0.035f);
+    photoClock.setFontFeatureSettings("tnum");
+    photoClock.setShadowLayer(dp(3), 0, dp(1), 0x55000000);
+    photoClockBlock.addView(photoClock, new LinearLayout.LayoutParams(-2, -2));
+    photoDate = text("", 20, 0xfff4f6fa);
+    photoDate.setGravity(Gravity.CENTER);
+    photoDate.setIncludeFontPadding(false);
+    photoDate.setSingleLine(true);
+    photoDate.setLetterSpacing(0.01f);
+    photoDate.setShadowLayer(dp(2), 0, dp(1), 0x66000000);
+    photoClockBlock.addView(photoDate, new LinearLayout.LayoutParams(-2, -2));
     FrameLayout.LayoutParams clockParams =
-        new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.START);
-    photoLayer.addView(photoClock, clockParams);
+        new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    photoLayer.addView(photoClockBlock, clockParams);
+  }
+
+  @Override
+  protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+    super.onSizeChanged(width, height, oldWidth, oldHeight);
+    if (width <= 0 || height <= 0) return;
+    // Match the approved 1280 x 800 composition, keeping the whole block inside portrait too.
+    float scale = Math.min(width / 1280f, height / 800f);
+    float fontScale = getResources().getDisplayMetrics().scaledDensity / density();
+    photoClock.setTextSize(TypedValue.COMPLEX_UNIT_PX, 152 * scale * fontScale);
+    photoDate.setTextSize(TypedValue.COMPLEX_UNIT_PX, 30 * scale * fontScale);
+    FrameLayout.LayoutParams block = (FrameLayout.LayoutParams) photoClockBlock.getLayoutParams();
+    block.bottomMargin = Math.round(55 * scale);
+    photoClockBlock.setLayoutParams(block);
+    LinearLayout.LayoutParams date = (LinearLayout.LayoutParams) photoDate.getLayoutParams();
+    date.topMargin = Math.round(6 * scale);
+    photoDate.setLayoutParams(date);
+    FrameLayout.LayoutParams shade = (FrameLayout.LayoutParams) photoShade.getLayoutParams();
+    shade.height = Math.round(height * 0.38f);
+    photoShade.setLayoutParams(shade);
   }
 
   private ImageView photoImage(Context context) {
@@ -514,10 +576,7 @@ final class AmbientView extends FrameLayout {
     ui.removeCallbacks(shiftTick);
     ui.removeCallbacks(photoTick);
     ui.removeCallbacks(bgTick);
-    photoA.animate().cancel();
-    photoB.animate().cancel();
-    photoA.clearAnimation();
-    photoB.clearAnimation();
+    finishPhotoTransition();
     bgA.animate().cancel();
     bgB.animate().cancel();
     bgA.clearAnimation();
@@ -526,34 +585,103 @@ final class AmbientView extends FrameLayout {
 
   @Override
   protected void onDetachedFromWindow() {
+    stopPhotoRequests();
     hide();
-    super.onDetachedFromWindow();
-  }
-
-  /**
-   * Switch to the photo frame. Returns false and shows an empty-state hint when no photos exist.
-   */
-  boolean enterPhotoMode() {
-    List<File> files = photosDir == null ? new ArrayList<>() : listPhotoFiles(photosDir);
-    photoFiles = files;
-    photoIndex = 0;
-    mode = Mode.PHOTO;
-    bgLayer.setVisibility(GONE);
-    infoLayer.setVisibility(GONE);
-    wakeBar.setVisibility(GONE);
-    photoLayer.setVisibility(VISIBLE);
-    ui.removeCallbacks(photoTick);
-    photoEmpty.setVisibility(files.isEmpty() ? VISIBLE : GONE);
+    finishPhotoTransition();
     photoA.setImageBitmap(null);
     photoB.setImageBitmap(null);
     if (frontBitmap != null) {
       frontBitmap.recycle();
       frontBitmap = null;
     }
-    if (files.isEmpty()) return false;
-    showPhoto(photoIndex);
-    ui.postDelayed(photoTick, PHOTO_MS);
-    return true;
+    photoFallback.setImageBitmap(null);
+    if (fallbackBitmap != null) fallbackBitmap.recycle();
+    fallbackBitmap = null;
+    super.onDetachedFromWindow();
+  }
+
+  /** Prepare before standby, and keep downloading while the user touches or talks. */
+  void preparePhotos() {
+    if (photoPrepared) return;
+    photoPrepared = true;
+    final int generation = photoGeneration;
+    photoLoading = true;
+    new Thread(() -> {
+      File cache = remotePhotos.cachedPhoto();
+      final Bitmap cached = RemotePhotoRepository.looksComplete(cache) ? decodeSampled(cache) : null;
+      ui.post(() -> {
+        if (generation != photoGeneration) {
+          if (cached != null) cached.recycle();
+          return;
+        }
+        photoLoading = false;
+        if (cached != null && frontBitmap == null) {
+          finishPhotoTransition();
+          photoA.setImageBitmap(cached);
+          photoA.setAlpha(1f);
+          frontBitmap = cached;
+          frontIsA = true;
+          photoDueAt = SystemClock.elapsedRealtime() + PHOTO_MS;
+          photoEmpty.setVisibility(GONE);
+          clearPhotoFallback();
+          if (isShowing() && mode == Mode.PHOTO) ui.postDelayed(photoTick, PHOTO_MS);
+        } else if (cached != null) cached.recycle();
+        prefetchPhoto();
+      });
+    }, "photo-cache").start();
+  }
+
+  /** Cached/API photos replace the temporary scenic background only when fully ready. */
+  boolean enterPhotoMode() {
+    mode = Mode.PHOTO;
+    bgLayer.setVisibility(GONE);
+    infoLayer.setVisibility(GONE);
+    wakeBar.setVisibility(GONE);
+    photoLayer.setVisibility(VISIBLE);
+    showPhotoDownloadProgress();
+    photoEmpty.setVisibility(frontBitmap == null ? VISIBLE : GONE);
+    if (frontBitmap == null) loadPhotoFallback();
+    preparePhotos();
+    advancePhotoIfReady();
+    if (frontBitmap != null) {
+      ui.postDelayed(photoTick, Math.max(0, photoDueAt - SystemClock.elapsedRealtime()));
+      prefetchPhoto();
+      return true;
+    }
+    return false;
+  }
+
+  private void loadPhotoFallback() {
+    if (fallbackBitmap != null || fallbackLoading) return;
+    fallbackLoading = true;
+    final int generation = photoGeneration;
+    new Thread(() -> {
+      Bitmap bitmap = decodeSampledAsset("ambient_bg/frame-lake.jpg");
+      ui.post(() -> {
+        fallbackLoading = false;
+        if (generation != photoGeneration || frontBitmap != null) {
+          if (bitmap != null) bitmap.recycle();
+          return;
+        }
+        fallbackBitmap = bitmap;
+        photoFallback.setImageBitmap(bitmap);
+        photoFallback.setVisibility(VISIBLE);
+      });
+    }, "photo-placeholder").start();
+  }
+
+  private void clearPhotoFallback() {
+    photoFallback.setVisibility(GONE);
+    photoFallback.setImageBitmap(null);
+    if (fallbackBitmap != null) fallbackBitmap.recycle();
+    fallbackBitmap = null;
+  }
+
+  private void showPhotoDownloadProgress() {
+    String detail = photoDownloadedBytes > 0
+        ? String.format(Locale.CHINA, " · 已接收 %.1f MB", photoDownloadedBytes / 1048576.0)
+        : "";
+    photoEmpty.setText("正在后台下载照片" + detail + "…");
   }
 
   private static String extensionOf(String name) {
@@ -561,7 +689,7 @@ final class AmbientView extends FrameLayout {
     return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
   }
 
-  /** Usable images in the photos folder, in file-name order. Shared by frame and background. */
+  /** Local information-screen backgrounds in file-name order. */
   private static List<File> listPhotoFiles(File dir) {
     File[] listed =
         dir.listFiles(f -> f.isFile() && PHOTO_EXTS.contains(extensionOf(f.getName())));
@@ -665,6 +793,7 @@ final class AmbientView extends FrameLayout {
     photoClock.setText(hm);
     String lunar = LunarCalendar.format(LocalDate.now());
     String date = new SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(now);
+    photoDate.setText(date);
     dateText.setText(lunar.isEmpty() ? date : date + " · " + lunar);
     renderDressPanel();
   }
@@ -1083,76 +1212,184 @@ final class AmbientView extends FrameLayout {
 
   // ---- photo frame ----
 
-  private void showPhoto(int index) {
-    if (index < 0 || index >= photoFiles.size()) return;
-    final File file = photoFiles.get(index);
-    new Thread(
-            () -> {
-              final Bitmap bitmap = decodeSampled(file);
-              if (bitmap == null) return;
-              ui.post(
-                  () -> {
-                    if (!isShowing() || mode != Mode.PHOTO) {
-                      bitmap.recycle();
-                      return;
-                    }
-                    ImageView incoming = frontIsA ? photoB : photoA;
-                    final ImageView outgoing = frontIsA ? photoA : photoB;
-                    incoming.clearAnimation();
-                    incoming.animate().cancel();
-                    incoming.setImageBitmap(bitmap);
-                    incoming.setAlpha(0f);
-                    incoming.setScaleX(1f);
-                    incoming.setScaleY(1f);
-                    incoming.bringToFront();
-                    photoClock.bringToFront();
-                    final Bitmap old = frontBitmap;
-                    incoming
-                        .animate()
-                        .alpha(1f)
-                        .setDuration(FADE_MS)
-                        .withEndAction(
-                            () -> {
-                              outgoing.setImageBitmap(null);
-                              if (old != null && old != bitmap) old.recycle();
-                            })
-                        .start();
-                    // Slow push-in for the photo's whole slot, as a view animation so it
-                    // does not fight the alpha animator; the Snapdragon 624 gets exactly
-                    // this one cheap transform, nothing more.
-                    ScaleAnimation pushIn =
-                        new ScaleAnimation(
-                            1f,
-                            1.07f,
-                            1f,
-                            1.07f,
-                            Animation.RELATIVE_TO_SELF,
-                            0.5f,
-                            Animation.RELATIVE_TO_SELF,
-                            0.5f);
-                    pushIn.setDuration(PHOTO_MS);
-                    pushIn.setFillAfter(true);
-                    incoming.startAnimation(pushIn);
-                    frontBitmap = bitmap;
-                    frontIsA = !frontIsA;
-                  });
-            })
-        .start();
+  private void stopPhotoRequests() {
+    photoGeneration++;
+    if (photoCall != null) photoCall.cancel();
+    photoCall = null;
+    photoLoading = false;
+    photoPrepared = false;
+    ui.removeCallbacks(photoTick);
+    ui.removeCallbacks(photoRetry);
+    if (pendingPhoto != null) pendingPhoto.recycle();
+    pendingPhoto = null;
+    if (pendingPhotoFile != null) remotePhotos.discard(pendingPhotoFile);
+    pendingPhotoFile = null;
   }
 
-  /** Decode at most ~1280 px wide: full-size photos would OOM this 2 GB device. */
+  private void prefetchPhoto() {
+    if (!photoPrepared || photoLoading || pendingPhoto != null) return;
+    ui.removeCallbacks(photoRetry);
+    final int generation = photoGeneration;
+    final Call call = remotePhotos.newCall();
+    photoCall = call;
+    photoLoading = true;
+    photoDownloadedBytes = 0;
+    if (frontBitmap == null) showPhotoDownloadProgress();
+    new Thread(() -> {
+      File downloaded = null;
+      Bitmap decoded = null;
+      try {
+        downloaded = remotePhotos.download(call, (received, total) -> ui.post(() -> {
+          if (generation != photoGeneration || photoCall != call) return;
+          photoDownloadedBytes = received;
+          if (frontBitmap == null) showPhotoDownloadProgress();
+        }));
+        if (RemotePhotoRepository.looksComplete(downloaded)) {
+          decoded = decodeSampled(downloaded);
+          if (decoded != null) Log.i("PhotoFrame", "Decoded sampled photo "
+              + decoded.getWidth() + "x" + decoded.getHeight()
+              + " bytes=" + decoded.getAllocationByteCount());
+          else Log.w("PhotoFrame", "Photo decode failed");
+        } else Log.w("PhotoFrame", "Photo response ended with an incomplete image");
+      } catch (IOException | RuntimeException e) {
+        if (!call.isCanceled()) Log.w("PhotoFrame", "Photo download failed", e);
+      }
+      final File file = downloaded;
+      final Bitmap bitmap = decoded;
+      ui.post(() -> {
+        if (generation != photoGeneration || photoCall != call) {
+          if (bitmap != null) bitmap.recycle();
+          if (file != null) remotePhotos.discard(file);
+          return;
+        }
+        photoCall = null;
+        photoLoading = false;
+        if (bitmap == null) {
+          if (file != null) remotePhotos.discard(file);
+          if (frontBitmap == null) {
+            photoEmpty.setText("照片下载失败，正在自动重试…");
+            photoEmpty.setVisibility(VISIBLE);
+          }
+          ui.postDelayed(photoRetry, PHOTO_RETRY_MS);
+          return;
+        }
+        pendingPhoto = bitmap;
+        pendingPhotoFile = file;
+        advancePhotoIfReady();
+      });
+    }, "photo-download").start();
+  }
+
+  private void advancePhotoIfReady() {
+    if (!isShowing() || mode != Mode.PHOTO) return;
+    long remaining = photoDueAt - SystemClock.elapsedRealtime();
+    if (frontBitmap != null && remaining > 0) {
+      ui.removeCallbacks(photoTick);
+      ui.postDelayed(photoTick, remaining);
+      return;
+    }
+    if (pendingPhoto == null) {
+      // The deadline does not trigger a second request or clear the current image.
+      // An in-flight request switches the image when it eventually succeeds.
+      return;
+    }
+    Bitmap bitmap = pendingPhoto;
+    pendingPhoto = null;
+    if (pendingPhotoFile != null) {
+      if (!remotePhotos.promote(pendingPhotoFile)) remotePhotos.discard(pendingPhotoFile);
+      pendingPhotoFile = null;
+    }
+    finishPhotoTransition();
+    ImageView incoming = frontIsA ? photoB : photoA;
+    ImageView outgoing = frontIsA ? photoA : photoB;
+    final Bitmap old = frontBitmap;
+    retiringPhoto = old;
+    incoming.setImageBitmap(bitmap);
+    incoming.setAlpha(old == null ? 1f : 0f);
+    incoming.setScaleX(1f);
+    incoming.setScaleY(1f);
+    incoming.bringToFront();
+    photoEmpty.setVisibility(GONE);
+    clearPhotoFallback();
+    photoShade.bringToFront();
+    photoClockBlock.bringToFront();
+    frontBitmap = bitmap;
+    frontIsA = !frontIsA;
+    if (old != null) {
+      incoming.animate().alpha(1f).setDuration(FADE_MS).withEndAction(() -> {
+        outgoing.setImageBitmap(null);
+        if (retiringPhoto == old) {
+          old.recycle();
+          retiringPhoto = null;
+        }
+      }).start();
+    }
+    ScaleAnimation pushIn = new ScaleAnimation(1f, 1.07f, 1f, 1.07f,
+        Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+    pushIn.setDuration(PHOTO_MS);
+    pushIn.setFillAfter(true);
+    incoming.startAnimation(pushIn);
+    photoDueAt = SystemClock.elapsedRealtime() + PHOTO_MS;
+    ui.removeCallbacks(photoTick);
+    ui.postDelayed(photoTick, PHOTO_MS);
+    // Start now, while this image is being displayed, rather than at the deadline.
+    prefetchPhoto();
+  }
+
+  private void finishPhotoTransition() {
+    photoA.animate().cancel();
+    photoB.animate().cancel();
+    photoA.clearAnimation();
+    photoB.clearAnimation();
+    ImageView outgoing = frontIsA ? photoB : photoA;
+    outgoing.setImageBitmap(null);
+    (frontIsA ? photoA : photoB).setAlpha(1f);
+    if (retiringPhoto != null) retiringPhoto.recycle();
+    retiringPhoto = null;
+  }
+
+  /** Bound both dimensions and honor original-photo EXIF without loading the full image. */
   private static Bitmap decodeSampled(File file) {
+    if (!file.isFile()) return null;
+    Bitmap bitmap = null;
     try {
       BitmapFactory.Options bounds = new BitmapFactory.Options();
       bounds.inJustDecodeBounds = true;
       BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
-      if (bounds.outWidth <= 0) return null;
+      if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
       int sample = 1;
-      while (bounds.outWidth / sample > 1280) sample *= 2;
+      while (Math.max(bounds.outWidth, bounds.outHeight) > 1280L * sample) sample *= 2;
       BitmapFactory.Options opts = new BitmapFactory.Options();
       opts.inSampleSize = sample;
-      return BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
-    } catch (RuntimeException e) {
+      opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+      bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+      if (bitmap == null) return null;
+      int orientation;
+      try {
+        orientation = new ExifInterface(file.getAbsolutePath())
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+      } catch (IOException e) {
+        return bitmap;
+      }
+      Matrix transform = new Matrix();
+      switch (orientation) {
+        case ExifInterface.ORIENTATION_FLIP_HORIZONTAL: transform.setScale(-1, 1); break;
+        case ExifInterface.ORIENTATION_ROTATE_180: transform.setRotate(180); break;
+        case ExifInterface.ORIENTATION_FLIP_VERTICAL: transform.setScale(1, -1); break;
+        case ExifInterface.ORIENTATION_TRANSPOSE:
+          transform.setRotate(90); transform.postScale(-1, 1); break;
+        case ExifInterface.ORIENTATION_ROTATE_90: transform.setRotate(90); break;
+        case ExifInterface.ORIENTATION_TRANSVERSE:
+          transform.setRotate(-90); transform.postScale(-1, 1); break;
+        case ExifInterface.ORIENTATION_ROTATE_270: transform.setRotate(270); break;
+        default: return bitmap;
+      }
+      Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0,
+          bitmap.getWidth(), bitmap.getHeight(), transform, true);
+      if (rotated != bitmap) bitmap.recycle();
+      return rotated;
+    } catch (RuntimeException | OutOfMemoryError e) {
+      if (bitmap != null) bitmap.recycle();
       return null;
     }
   }
@@ -1188,7 +1425,8 @@ final class AmbientView extends FrameLayout {
   private static final long WEATHER_TTL_MS = AmbientRepository.WEATHER_RETRY_INTERVAL_MS;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;
-  private static final long PHOTO_MS = 20_000L;
+  static final long PHOTO_MS = 5 * 60_000L;
+  private static final long PHOTO_RETRY_MS = 30_000L;
   private static final long BG_MS = 60_000L;
   private static final long FADE_MS = 700L;
 

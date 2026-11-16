@@ -659,6 +659,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         new AmbientRepository(this, () -> prefs.getString("http", "")),
         photosDir,
         this::displayedWakePhrase);
+    if (prefs.getBoolean(AMBIENT_MODE_PREF, false)) ambient.preparePhotos();
     // Below the black curtain: the curtain still wins when the screen blanks.
     frame.addView(ambient, new FrameLayout.LayoutParams(-1, -1));
     curtain = new View(this);
@@ -1474,10 +1475,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         ? photoMode.getId() : infoMode.getId());
     standbyModes.setOnCheckedChangeListener((group, checkedId) -> {
       prefs.edit().putBoolean(AMBIENT_MODE_PREF, checkedId == photoMode.getId()).apply();
+      if (checkedId == photoMode.getId() && ambient != null) ambient.preparePhotos();
       touch();
     });
     standby.addView(standbyModes);
-    TextView photoNote = label("相框轮播本地照片；没有照片时显示提示。", 12, 0xff7883ab);
+    TextView photoNote = label("相框每 5 分钟轮换 API 照片，提前后台下载；新照片未就绪时继续显示当前照片。", 12, 0xff7883ab);
     standby.addView(photoNote);
     LinearLayout screen = settingsCard(panel, "自动熄屏", "一段时间没碰屏幕、也没在对话时熄屏；碰一下屏幕或说唤醒词就亮。关闭后屏幕保持常亮。");
     LinearLayout screenHeader = new LinearLayout(this);
