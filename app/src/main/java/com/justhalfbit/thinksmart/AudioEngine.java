@@ -4,6 +4,9 @@ import android.content.Context;
 import android.media.*;
 import android.media.audiofx.*;
 import android.util.Log;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,12 +18,15 @@ final class AudioEngine {
 
     void wake(byte[] pcm);
 
+    /** A stop word （停止/暂停） was spotted locally; no PCM snapshot is needed. */
+    void stopWord();
+
     void error(String text);
   }
 
   private final Context context;
   private final Callback callback;
-  private volatile boolean running, wakeEnabled = true;
+  private volatile boolean running;
   private volatile float inputLevel, outputLevel;
   private final PcmRing recentAudio = new PcmRing(160000);
   private volatile boolean previewing;
@@ -50,10 +56,6 @@ final class AudioEngine {
   AudioEngine(Context context, Callback cb) {
     this.context = context;
     callback = cb;
-  }
-
-  void setWakeEnabled(boolean value) {
-    wakeEnabled = value;
   }
 
   void start() {
@@ -127,8 +129,7 @@ final class AudioEngine {
         String requestedPhrase = settings.getString(WakePhrase.KEY, "");
         if (kws != null && !requestedPhrase.equals(currentPhrase)) {
           try {
-            kws.setPhrase(requestedPhrase, requestedPhrase.isEmpty() ? ""
-                : WakePhrase.keywords(context.getAssets(), requestedPhrase));
+            kws.setPhrase(requestedPhrase, spotterKeywords(requestedPhrase));
             currentPhrase = requestedPhrase;
           } catch (Exception e) {
             currentPhrase = requestedPhrase;
@@ -144,8 +145,10 @@ final class AudioEngine {
         if (previewing) continue;
         ring.add(pcm);
         recentAudio.add(pcm);
-        if (kws != null && wakeEnabled && kws.feed(pcm)) {
-          callback.wake(ring.snapshot());
+        if (kws != null) {
+          KeywordHit.Kind hit = kws.feed(pcm);
+          if (hit == KeywordHit.Kind.WAKE) callback.wake(ring.snapshot());
+          else if (hit == KeywordHit.Kind.STOP) callback.stopWord();
         }
         double energy = 0;
         for (short v : pcm) energy += (double) v * v;
@@ -189,6 +192,32 @@ final class AudioEngine {
       }
     }
     return restart;
+  }
+
+  /**
+   * Keyword lines for the spotter: the wake phrase plus the two stop words, always.
+   * Default mode spells out the bundled preset lines (plus stop words) instead of
+   * passing an empty string, so the stop words are spotted in both modes.
+   */
+  private String spotterKeywords(String requestedPhrase) throws Exception {
+    String stops = WakePhrase.keywords(context.getAssets(), KeywordHit.STOP_HALT)
+        + "\n" + WakePhrase.keywords(context.getAssets(), KeywordHit.STOP_PAUSE);
+    if (!requestedPhrase.isEmpty())
+      return WakePhrase.keywords(context.getAssets(), requestedPhrase) + "\n" + stops;
+    StringBuilder presets = new StringBuilder();
+    try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+        context.getAssets().open("kws-zh/keywords.txt"), StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        line = line.trim();
+        if (!line.isEmpty()) {
+          if (presets.length() > 0) presets.append('\n');
+          presets.append(line);
+        }
+      }
+    }
+    if (presets.length() == 0) throw new IllegalStateException("默认唤醒词表为空");
+    return presets + "\n" + stops;
   }
 
   void configure(int rate) {

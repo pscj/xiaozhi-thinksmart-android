@@ -125,6 +125,8 @@ public class VoiceService extends Service {
   private long listenStarted, lastExtended;
   private long turn, abortUntil;
   private String session = "", pendingText = "", state = "待机", error = "";
+  /** Text of the reply sentence currently being played; drives the stop-word echo guard. */
+  private String playingSentence = "";
   private String threadEntry = "default";
   private volatile Listener listener;
   private PowerManager.WakeLock wakeLock;
@@ -256,6 +258,10 @@ public class VoiceService extends Service {
                 io.post(() -> onLocalWake(pcm));
               }
 
+              public void stopWord() {
+                io.post(() -> onStopWord());
+              }
+
               public void error(String text) {
                 io.post(
                     () -> {
@@ -264,7 +270,6 @@ public class VoiceService extends Service {
                     });
               }
             });
-    audio.setWakeEnabled(prefs.getBoolean("wake", true));
     audio.start();
     io.post(
         () -> {
@@ -504,6 +509,7 @@ public class VoiceService extends Service {
     if (old != null) old.cancel();
     ready = uploading = false;
     replyListening = stopWordsSupported = false;
+    playingSentence = "";
     acceptTurn = false;
     muted = true;
     turn++;
@@ -553,6 +559,7 @@ public class VoiceService extends Service {
           boolean keepListening = uploading && !state.equals("识别中");
           long played = audio.playedMs();
           cancelVerification();
+          playingSentence = "";
           if (state.equals("回复中")) {
             chats.markInterrupted(threadEntry);
             saveChats();
@@ -575,6 +582,23 @@ public class VoiceService extends Service {
             io.postDelayed(listenTimeout, LISTEN_IDLE_TIMEOUT_MS);
           } else setState("待机");
         });
+  }
+
+  /**
+   * A stop word was spotted locally. Pure interruption, identical to the on-screen
+   * abort button: no wake verification, no greeting, no new turn. The state gate
+   * inside abort() confines it to thinking/speaking, so idle hits are no-ops.
+   */
+  private void onStopWord() {
+    if (destroyed) return;
+    // Self-trigger guard: the reply now playing may itself say 停止/暂停, and the
+    // microphone hears the speaker. Only the current sentence is checked.
+    if (KeywordHit.sentenceMentionsStopWord(playingSentence)) {
+      if (Log.isLoggable("VoiceTrace", Log.DEBUG))
+        Log.d("VoiceTrace", "stop word ignored: playing sentence mentions a stop word");
+      return;
+    }
+    abort();
   }
 
   private void awaitAbort() {
@@ -718,8 +742,9 @@ public class VoiceService extends Service {
   }
 
   private String interruptionMode() {
-    String mode = prefs.getString("speechInterruptMode", "keywords");
-    return mode.equals("any") || mode.equals("off") ? mode : "keywords";
+    // Fixed by design, not a user setting: stop-word interruption is the only
+    // speech mode; the button and the wake word remain available as well.
+    return "keywords";
   }
 
   public void end() {
@@ -743,6 +768,7 @@ public class VoiceService extends Service {
   private void endInternal() {
     cancelVerification();
     replyListening = false;
+    playingSentence = "";
     botStarted = false;
     if (state.equals("回复中")) {
       chats.markInterrupted(threadEntry);
@@ -825,8 +851,8 @@ public class VoiceService extends Service {
       stopWordsSupported = features != null && features.optBoolean("speech_interrupt");
       replyListening = false;
       ready = true;
-      error = interruptionMode().equals("keywords") && !stopWordsSupported
-          ? "网关尚不支持停止词打断，请更新网关；当前可用按钮或唤醒词打断" : "";
+      // Local stop words no longer depend on gateway support, so no warning here.
+      error = "";
       muted = false;
       syncManagement();
       setState("待机");
@@ -839,6 +865,7 @@ public class VoiceService extends Service {
     if (abortUntil > 0) {
       if (type.equals("tts") && phase.equals("stop") && msg.optBoolean("interrupted")) {
         abortUntil = 0;
+        playingSentence = "";
         resumeAfterAbort();
         return;
       }
@@ -895,15 +922,18 @@ public class VoiceService extends Service {
         io.removeCallbacks(listenTimeout);
         turn++;
         muted = false;
+        playingSentence = "";
         audio.newTurn();
         listenDuringReply();
         setState("思考中");
         io.postDelayed(listenTimeout, 120000);
       } else if (phase.equals("sentence_start") && !muted) {
         listenDuringReply();
+        playingSentence = msg.optString("text");
         message("小麦", msg.optString("text"));
         setState("回复中");
       } else if (phase.equals("stop") && !muted) {
+        playingSentence = "";
         long marker = turn;
         if (msg.optBoolean("interrupted")) {
           audio.clear();
@@ -970,7 +1000,6 @@ public class VoiceService extends Service {
           muted = true;
           audio.clear();
           turn++;
-          audio.setWakeEnabled(prefs.getBoolean("wake", true));
           connect();
         });
   }

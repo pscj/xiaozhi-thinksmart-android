@@ -1627,7 +1627,6 @@ public class MainActivity extends Activity implements VoiceService.Listener {
             prefs.getString("ws", ""), prefs.getString("http", "")), false);
     serverIp.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
     Switch keep = check(connectionSection, "保持应用窗口常亮", prefs.getBoolean("keepScreen", true));
-    Switch wake = check(connectionSection, "启用离线唤醒词", prefs.getBoolean("wake", true));
     EditText wakePhrase = field(connectionSection, "自定义唤醒词（2 至 12 个汉字，留空恢复默认）",
         prefs.getString(WakePhrase.KEY, ""), false);
     Button applyWakePhrase = button("应用唤醒词", () -> {
@@ -1650,24 +1649,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     });
     connectionSection.addView(applyWakePhrase);
     Switch verify = check(connectionSection, "唤醒二次确认", prefs.getBoolean("wakeVerify", false));
-    connectionSection.addView(label("语音打断方式", 14, 0xffb6c0e2));
-    RadioGroup interruptionModes = new RadioGroup(this);
-    String[] interruptionValues = {"keywords", "any", "off"};
-    String[] interruptionLabels = {"停止词打断：单独说「停止」或「暂停」", "自由插话：直接说新问题打断", "关闭语音打断"};
-    String savedInterruption = prefs.getString("speechInterruptMode", "keywords");
-    for (int i = 0; i < interruptionValues.length; i++) {
-      RadioButton option = new RadioButton(this);
-      option.setId(View.generateViewId());
-      option.setTag(interruptionValues[i]);
-      option.setText(interruptionLabels[i]);
-      option.setTextColor(Color.WHITE);
-      interruptionModes.addView(option, new RadioGroup.LayoutParams(-1, dp(48)));
-      if (interruptionValues[i].equals(savedInterruption)) interruptionModes.check(option.getId());
-    }
-    if (interruptionModes.getCheckedRadioButtonId() == -1)
-      interruptionModes.check(interruptionModes.getChildAt(0).getId());
-    connectionSection.addView(interruptionModes);
-    connectionSection.addView(label("停止词模式下，思考和播报期间的其他话会忽略；按钮和唤醒词仍可打断。", 12, 0xff7883ab));
+    connectionSection.addView(label("语音打断固定为停止词打断：单独说「停止」或「暂停」即可停下；思考和播报期间的其他话会忽略，按钮和唤醒词仍可打断。", 12, 0xff7883ab));
     Switch recognitionInput = check(connectionSection, "录音使用语音识别模式（关闭为通话模式）",
         prefs.getBoolean("recognitionInput", false));
     Switch inputNoiseSuppression = check(connectionSection, "启用录音降噪",
@@ -1712,10 +1694,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
                     .putString("serverIp", address.ip)
                     .putString("ws", address.websocket)
                     .putString("http", address.management)
-                    .putBoolean("wake", wake.isChecked())
                     .putBoolean("wakeVerify", verify.isChecked())
-                    .putString("speechInterruptMode", interruptionModes
-                        .findViewById(interruptionModes.getCheckedRadioButtonId()).getTag().toString())
                     .putBoolean("recognitionInput", recognitionInput.isChecked())
                     .putBoolean("inputNoiseSuppression", inputNoiseSuppression.isChecked())
                     .putBoolean("keepScreen", keep.isChecked())

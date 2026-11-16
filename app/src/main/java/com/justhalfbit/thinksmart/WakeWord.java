@@ -13,6 +13,8 @@ final class WakeWord implements AutoCloseable {
   private int hang;
   private final WakeGain gain = new WakeGain();
   private final java.util.ArrayDeque<float[]> preroll = new java.util.ArrayDeque<>();
+  /** Keyword names bundled in kws-zh/keywords.txt; these wake in default mode. */
+  private final java.util.Set<String> defaultPhrases = new java.util.HashSet<>();
 
   WakeWord(AssetManager assets) {
     OnlineTransducerModelConfig transducer = new OnlineTransducerModelConfig();
@@ -34,6 +36,26 @@ final class WakeWord implements AutoCloseable {
     cfg.setNumTrailingBlanks(1);
     spotter = new KeywordSpotter(assets, cfg);
     stream = spotter.createStream("");
+    try (java.io.BufferedReader reader =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(
+                assets.open("kws-zh/keywords.txt"), java.nio.charset.StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        int at = line.lastIndexOf('@');
+        if (at >= 0) {
+          String name = line.substring(at + 1).trim();
+          if (!name.isEmpty()) defaultPhrases.add(name);
+        }
+      }
+    } catch (Exception ignored) {
+      // Fall through to the bundled names below.
+    }
+    if (defaultPhrases.isEmpty()) {
+      defaultPhrases.add("小麦小麦");
+      defaultPhrases.add("哈喽小麦");
+      defaultPhrases.add("小麦同学");
+    }
   }
 
   void setPhrase(String phrase, String keywords) {
@@ -45,7 +67,7 @@ final class WakeWord implements AutoCloseable {
     preroll.clear();
   }
 
-  boolean feed(short[] pcm) {
+  KeywordHit.Kind feed(short[] pcm) {
     double sum = 0;
     for (short sample : pcm) sum += (double) sample * sample;
     double rms = Math.sqrt(sum / pcm.length) / 32768.0;
@@ -59,7 +81,7 @@ final class WakeWord implements AutoCloseable {
     } else if (hang == 0) {
       if (preroll.size() == 5) preroll.removeFirst();
       preroll.addLast(samples);
-      return false;
+      return KeywordHit.Kind.NONE;
     } else hang--;
     stream.acceptWaveform(samples, 16000);
     while (spotter.isReady(stream)) {
@@ -67,14 +89,16 @@ final class WakeWord implements AutoCloseable {
       String hit = spotter.getResult(stream).getKeyword();
       if (!hit.isEmpty()) {
         spotter.reset(stream);
+        KeywordHit.Kind kind = KeywordHit.classify(hit, phrase, defaultPhrases);
+        if (kind == KeywordHit.Kind.NONE) continue;
         long now = SystemClock.elapsedRealtime();
-        if ((phrase.isEmpty() || phrase.equals(hit)) && now - lastHit > 2000) {
+        if (now - lastHit > 2000) {
           lastHit = now;
-          return true;
+          return kind;
         }
       }
     }
-    return false;
+    return KeywordHit.Kind.NONE;
   }
 
   public void close() {

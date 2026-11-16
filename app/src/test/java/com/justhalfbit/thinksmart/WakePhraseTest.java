@@ -16,4 +16,9 @@ public class WakePhraseTest {
     try { convert("hello"); fail("应拒绝非汉字"); }
     catch (IllegalArgumentException expected) { }
   }
+
+  @Test public void convertsStopWords() throws Exception {
+    assertEquals("t íng zh ǐ @停止", convert("停止"));
+    assertEquals("z àn t íng @暂停", convert("暂停"));
+  }
 }
