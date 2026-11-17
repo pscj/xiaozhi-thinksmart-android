@@ -215,17 +215,14 @@ final class AmbientView extends FrameLayout {
     infoLayer.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
     // The clock block: taller than the weather side it shares the top row with (the
-    // CLOCK_LINE_SP layout line reserves the font's full top..bottom), so
-    // renderWeather shifts it by the measured difference — see alignClockBlock —
-    // until the date line's top meets the weather cluster's bottom. The digits
-    // themselves are drawn larger than the layout line, inside the same line box
-    // — see enlargeClockGlyphs — without moving anything.
+    // 96 sp line reserves the font's full top..bottom), so renderWeather shifts it by
+    // the measured difference — see alignClockBlock — until the date line's top
+    // meets the weather cluster's bottom.
     leftCol = new LinearLayout(context);
     leftCol.setOrientation(LinearLayout.VERTICAL);
     top.addView(leftCol, new LinearLayout.LayoutParams(0, -2, 1.2f));
-    timeText = text("", (int) CLOCK_LINE_SP, 0xfff2f5ff);
+    timeText = text("", 96, 0xfff2f5ff);
     timeText.setTypeface(null, Typeface.BOLD);
-    enlargeClockGlyphs();
     leftCol.addView(timeText);
     dateText = text("", 24, 0xffb6c0e2);
     LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
@@ -1041,7 +1038,7 @@ final class AmbientView extends FrameLayout {
    * Shift the clock block until the date line's top lands exactly on the weather
    * cluster's bottom. The two columns share the top row's top anchor; the shift is
    * the measured difference between the date line's top offset within the clock
-   * block (the CLOCK_LINE_SP layout line plus the date line's top margin) and the cluster bottom's
+   * block (the 96 sp line plus the date line's top margin) and the cluster bottom's
    * offset within its own column (city line + cluster margin + cluster body),
    * never a guessed constant. The shift comes out near zero — a small lift or a
    * small drop, whichever the measured fonts dictate — so the block's top margin
@@ -1056,7 +1053,7 @@ final class AmbientView extends FrameLayout {
    * the lifted clock glyphs always stay on the panel.
    */
   private void alignClockBlock(boolean cityShown, int clusterBodyPx) {
-    int dateTopPx = textLineHeightPx(CLOCK_LINE_SP, true) + dp(6);
+    int dateTopPx = textLineHeightPx(96f, true) + dp(6);
     int clusterBottomPx =
         (cityShown ? textLineHeightPx(20f, false) : 0) + dp(10) + clusterBodyPx;
     int shiftPx = dateTopPx - clusterBottomPx;
@@ -1102,52 +1099,6 @@ final class AmbientView extends FrameLayout {
     probe.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
     Paint.FontMetricsInt fm = probe.getFontMetricsInt();
     return fm.bottom - fm.top;
-  }
-
-  /**
-   * Draw the clock digits larger than the layout line, inside the same line box.
-   * All layout arithmetic (alignClockBlock's probe, the vertical budget) is built
-   * on the CLOCK_LINE_SP line: a plain TextView at that size reserves the font's
-   * full top..bottom, and the digit ink only fills the middle of that box — the
-   * rest is the font's internal padding. Here the display size is grown until the
-   * ink nearly fills the box, while setLineSpacing scales the line height back to
-   * exactly the CLOCK_LINE_SP box. The spacing multiplier scales the whole font
-   * metrics box, so the view's measured height and its baseline — and therefore
-   * every other position on the screen — stay identical to the plain
-   * CLOCK_LINE_SP text; that identity is what alignClockBlock's probe relies on,
-   * so the multiplier is the ratio of the two probe-measured line heights, never
-   * a written-down decimal. Font metrics and ink bounds both scale linearly with
-   * text size, so the display size is likewise derived from probe measurements
-   * at CLOCK_LINE_SP: the size whose ink height reaches the box minus
-   * CLOCK_INK_SLACK_DP at each end, clamped by the CLOCK_DISPLAY_MAX_SP ceiling
-   * and by the ink top keeping at least CLOCK_INK_TOP_CLEARANCE_DP inside the
-   * box top — the box top is what CLOCK_HEADROOM_DP's panel-edge headroom is
-   * measured from, so ink poking out of the box would eat into that headroom.
-   */
-  private void enlargeClockGlyphs() {
-    Paint probe = new Paint(Paint.ANTI_ALIAS_FLAG);
-    probe.setTypeface(Typeface.DEFAULT_BOLD);
-    probe.setTextSize(sp(CLOCK_LINE_SP));
-    Paint.FontMetricsInt fm = probe.getFontMetricsInt();
-    int lineBoxPx = fm.bottom - fm.top;
-    Rect ink = new Rect();
-    probe.getTextBounds("08:47", 0, 5, ink);
-    int inkHeightPx = ink.height();
-    int inkAbovePx = -ink.top;
-    if (lineBoxPx <= 0 || inkHeightPx <= 0 || inkAbovePx <= 0) return;
-    // Size whose ink height reaches the box minus the slack at each end.
-    float displaySp =
-        CLOCK_LINE_SP * (lineBoxPx - 2f * dp(CLOCK_INK_SLACK_DP)) / inkHeightPx;
-    // Clamp: the ink top must stay the clearance inside the box top.
-    float topLimitSp =
-        CLOCK_LINE_SP * (-fm.top - dp(CLOCK_INK_TOP_CLEARANCE_DP)) / (float) inkAbovePx;
-    displaySp = Math.min(displaySp, Math.min(CLOCK_DISPLAY_MAX_SP, topLimitSp));
-    // Never shrink below the layout size (a font whose ink already fills the box).
-    displaySp = Math.max(displaySp, CLOCK_LINE_SP);
-    timeText.setTextSize(TypedValue.COMPLEX_UNIT_SP, displaySp);
-    // Scale the larger font's natural line height back to the layout box.
-    int naturalPx = textLineHeightPx(displaySp, true);
-    if (naturalPx > 0) timeText.setLineSpacing(0f, (float) lineBoxPx / naturalPx);
   }
 
   private void setHeightPx(View view, int heightPx) {
@@ -1488,23 +1439,6 @@ final class AmbientView extends FrameLayout {
 
   /** Clearance kept above the lifted clock block (dp); covers the burn-in upward steps. */
   private static final int CLOCK_HEADROOM_DP = 6;
-
-  /**
-   * The clock's layout line size (sp): every layout measurement — alignClockBlock's
-   * probe, the vertical budget — is built on the line box a plain TextView reserves
-   * at this size. It is NOT the size the digits are drawn at; enlargeClockGlyphs
-   * grows the display size inside this unchanged box.
-   */
-  private static final float CLOCK_LINE_SP = 96f;
-
-  /** Ceiling for the clock's display size (sp) inside the CLOCK_LINE_SP line box. */
-  private static final float CLOCK_DISPLAY_MAX_SP = 130f;
-
-  /** Ink slack (dp) the clock's display size aims to leave at each end of the line box. */
-  private static final int CLOCK_INK_SLACK_DP = 5;
-
-  /** Minimum clearance (dp) kept between the clock ink's top and the line box's top. */
-  private static final int CLOCK_INK_TOP_CLEARANCE_DP = 4;
 
   /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
   private static final int WAKE_BAR_BG = 0xe6050813;
