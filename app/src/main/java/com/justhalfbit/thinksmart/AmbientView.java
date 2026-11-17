@@ -215,8 +215,8 @@ final class AmbientView extends FrameLayout {
     infoLayer.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
     // The clock block: taller than the weather side it shares the top row with (the
-    // 96 sp line reserves the font's full top..bottom), so renderWeather lifts it by
-    // the measured difference — see alignClockBlock — until the date line's bottom
+    // 96 sp line reserves the font's full top..bottom), so renderWeather shifts it by
+    // the measured difference — see alignClockBlock — until the date line's top
     // meets the weather cluster's bottom.
     leftCol = new LinearLayout(context);
     leftCol.setOrientation(LinearLayout.VERTICAL);
@@ -1035,29 +1035,30 @@ final class AmbientView extends FrameLayout {
   }
 
   /**
-   * Lift the clock block until the date line's bottom lands exactly on the weather
-   * cluster's bottom. The two columns share the top row's top anchor, but the clock
-   * block is the taller of the two — its 96 sp line reserves the font's full
-   * top..bottom — so the top row used to be as tall as the clock block and the whole
-   * lower screen sat that much lower than the cluster it belongs under. The lift is
-   * the measured difference between the two blocks (clock block height minus the
-   * cluster bottom's offset within its own column: city line + cluster margin +
-   * cluster body), never a guessed constant; with the block lifted, the top row
-   * shrinks to the weather side's height and the forecast strip, news region and
-   * dressing panel all move up by the same amount, the freed space collecting at
-   * the bottom of the weighted news region, above the wake bar. Recomputed on every
-   * weather render (the cluster body height arrives with it) and applied only when
-   * it changes. The burn-in nudge translates the whole info layer, so the alignment
-   * is against this unshifted base layout — and the layer's top padding grows with
-   * the lift (see below), so the lifted clock glyphs always stay on the panel.
+   * Shift the clock block until the date line's top lands exactly on the weather
+   * cluster's bottom. The two columns share the top row's top anchor; the shift is
+   * the measured difference between the date line's top offset within the clock
+   * block (the 96 sp line plus the date line's top margin) and the cluster bottom's
+   * offset within its own column (city line + cluster margin + cluster body),
+   * never a guessed constant. The shift comes out near zero — a small lift or a
+   * small drop, whichever the measured fonts dictate — so the block's top margin
+   * takes the signed value rather than clamping at zero, and the alignment holds
+   * either way. The date line hangs below the cluster's bottom edge, so the top
+   * row's height is the cluster bottom plus the date line; the forecast strip
+   * keeps its fixed margin under the row and the difference comes out of the
+   * weighted news region. Recomputed on every weather render (the cluster body
+   * height arrives with it) and applied only when it changes. The burn-in nudge
+   * translates the whole info layer, so the alignment is against this unshifted
+   * base layout — and the layer's top padding grows with the lift (see below), so
+   * the lifted clock glyphs always stay on the panel.
    */
   private void alignClockBlock(boolean cityShown, int clusterBodyPx) {
-    int clockBlockPx = textLineHeightPx(96f, true) + dp(6) + textLineHeightPx(24f, false);
+    int dateTopPx = textLineHeightPx(96f, true) + dp(6);
     int clusterBottomPx =
         (cityShown ? textLineHeightPx(20f, false) : 0) + dp(10) + clusterBodyPx;
-    int shiftPx = clockBlockPx - clusterBottomPx;
+    int shiftPx = dateTopPx - clusterBottomPx;
     LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) leftCol.getLayoutParams();
-    int margin = shiftPx > 0 ? -shiftPx : 0;
+    int margin = -shiftPx;
     if (lp.topMargin != margin) {
       lp.topMargin = margin;
       leftCol.setLayoutParams(lp);
@@ -1461,10 +1462,11 @@ final class AmbientView extends FrameLayout {
   // came up ~50 dp short: LinearLayout squeezed the overflow out of the dressing
   // panel's lower rows and the third news row). The screen is 800 px tall, ~533 dp at
   // the panel's density: top padding (20 base, growing to the clock lift + 6 when the
-  // clock block is lifted — see alignClockBlock) + top row ~120 + forecast margin 12 +
-  // strip 66 + bottom reserve 58 leaves ~245 dp for the news region. (The top row is
-  // the weather side's height, not the clock block's ~146: the clock block is lifted
-  // to bottom-align with the cluster.) Against that, the dressing panel is a known
+  // clock block is lifted — see alignClockBlock) + top row ~149 + forecast margin 12 +
+  // strip 66 + bottom reserve 58 leaves ~216 dp for the news region. (The top row is
+  // the weather side's ~120 plus the date line: the clock block is shifted until the
+  // date line's top meets the cluster's bottom, so the date line itself hangs below
+  // that line inside the row.) Against that, the dressing panel is a known
   // constant — padding 10+10, title 28, first row margin 8, five rows of 24 with
   // 6 dp gaps ≈ 200 — anchored to the region's bottom edge, and the news column
   // shows as many exact-pitch rows (gap 8 + height 32) as fit under its ~40 dp of
