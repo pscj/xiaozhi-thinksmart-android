@@ -5,6 +5,7 @@ import android.content.*;
 import android.media.AudioManager;
 import android.os.*;
 import android.util.Log;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import okhttp3.*;
@@ -19,6 +20,8 @@ public class VoiceService extends Service {
     void update(Snapshot snapshot);
     void showVolume(int volume);
     default void restoreAfterSleep() {}
+    default void alarmFired(String label, String timeText) {}
+    default void alarmStopped() {}
   }
 
   public static final class Snapshot {
@@ -57,6 +60,10 @@ public class VoiceService extends Service {
   }
 
   private ChatLog chats;
+  private Alarms alarms;
+  private final AlarmSound alarmSound = new AlarmSound();
+  private String ringingAlarmId;
+  private long ringingSince;
   private String chatDevice;
   private ManagementClient management;
   private String managementError = "", modelLabel = "选择模型";
@@ -88,6 +95,7 @@ public class VoiceService extends Service {
             if (listener != null && !uploading) refreshModels();
             refreshReports(false);
           }
+          checkAlarms();
           publish();
           io.postDelayed(this, 1000);
         }
@@ -212,6 +220,8 @@ public class VoiceService extends Service {
       prefs.edit().putBoolean("chatMigrationV2", true).apply();
     }
     saveChats();
+    alarms = new Alarms(prefs.getString("alarmsV1", "[]"));
+    alarms.setChangedListener(this::saveAlarms);
     try {
       wakeMatcher = new WakeMatcher(getAssets().open("kws-zh/pinyin.txt"));
     } catch (java.io.IOException ignored) {
@@ -381,6 +391,81 @@ public class VoiceService extends Service {
         .putString("chatsV2", chats.encode())
         .putString("chatsForDevice:" + chatDevice, chats.encode())
         .apply();
+  }
+
+  /** Device-local alarms behind the self.alarm.* MCP tools (see Alarms). */
+  public Alarms alarms() {
+    return alarms;
+  }
+
+  private void saveAlarms() {
+    prefs.edit().putString("alarmsV1", alarms.encode()).apply();
+  }
+
+  /**
+   * Per-second alarm check on the io thread: advance a due entry's state,
+   * start the local chime and bring the alarm screen forward. A ring nobody
+   * stops ends after 60 s; only one alarm rings at a time.
+   */
+  private void checkAlarms() {
+    if (alarms == null) return;
+    if (ringingAlarmId != null) {
+      if (SystemClock.elapsedRealtime() - ringingSince >= 60000) stopAlarmRinging();
+      return;
+    }
+    LocalDateTime now = LocalDateTime.now();
+    JSONObject due = alarms.dueItem(now);
+    if (due == null) return;
+    String id = due.optString("id"), label = due.optString("label", ""),
+        timeText = due.optString("time", "");
+    alarms.markFired(id, now);
+    ringingAlarmId = id;
+    ringingSince = SystemClock.elapsedRealtime();
+    alarmSound.start();
+    fireAlarmUi(label, timeText);
+  }
+
+  /** Stop the ringing alarm: user tap, stop button, or the 60 s timeout. */
+  public void stopAlarmRinging() {
+    io.post(
+        () -> {
+          if (ringingAlarmId == null) return;
+          ringingAlarmId = null;
+          alarmSound.stop();
+          Listener current = listener;
+          if (current != null) main.post(current::alarmStopped);
+        });
+  }
+
+  /** An alarm fired: relight the panel and let the activity show the alarm layer. */
+  private void fireAlarmUi(String label, String timeText) {
+    main.post(
+        () -> {
+          if (destroyed) return;
+          PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+          if (!pm.isInteractive()) {
+            PowerManager.WakeLock screen =
+                pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "thinksmart:alarm");
+            screen.acquire(3000);
+          }
+          // The app's black curtain can be up while Android is still interactive.
+          Listener current = listener;
+          if (current != null) {
+            current.alarmFired(label, timeText);
+            return;
+          }
+          try {
+            startActivity(
+                new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra("alarmLabel", label)
+                    .putExtra("alarmTime", timeText));
+          } catch (RuntimeException ignored) {
+            /* The ROM may require the notification to open the app. */
+          }
+        });
   }
 
   private void message(String role, String text) {
@@ -1377,6 +1462,7 @@ public class VoiceService extends Service {
     listener = null;
     io.removeCallbacksAndMessages(null);
     if (socket != null) socket.cancel();
+    alarmSound.stop();
     audio.stop();
     if (management != null) management.close();
     client.dispatcher().executorService().shutdown();

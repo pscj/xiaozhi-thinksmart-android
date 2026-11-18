@@ -2,6 +2,7 @@ package com.justhalfbit.thinksmart;
 
 import android.content.*;
 import android.media.AudioManager;
+import java.time.LocalDateTime;
 import org.json.*;
 
 final class Mcp {
@@ -63,6 +64,41 @@ final class Mcp {
                     VoiceService.json("type", "string")),
                 new JSONArray().put("enabled")));
         tools.put(tool("self.sleep_mode.get", "读取睡眠设置", new JSONObject(), new JSONArray()));
+        tools.put(
+            tool(
+                "self.alarm.create",
+                "创建设备本地闹钟：time 为 HH:MM；repeat 可选 once/daily/weekdays/weekly/monthly"
+                    + "（默认 once），weekly 必须给 weekdays（1=周一…7=周日），monthly 必须给 month_day",
+                VoiceService.json(
+                    "time",
+                    VoiceService.json("type", "string"),
+                    "repeat",
+                    VoiceService.json("type", "string"),
+                    "weekdays",
+                    VoiceService.json(
+                        "type", "array", "items", VoiceService.json("type", "integer")),
+                    "month_day",
+                    VoiceService.json("type", "integer", "minimum", 1, "maximum", 31),
+                    "label",
+                    VoiceService.json("type", "string")),
+                new JSONArray().put("time")));
+        tools.put(tool("self.alarm.list", "列出全部闹钟", new JSONObject(), new JSONArray()));
+        tools.put(
+            tool(
+                "self.alarm.cancel",
+                "删除闹钟",
+                VoiceService.json("id", VoiceService.json("type", "string")),
+                new JSONArray().put("id")));
+        tools.put(
+            tool(
+                "self.alarm.set_enabled",
+                "开关闹钟",
+                VoiceService.json(
+                    "id",
+                    VoiceService.json("type", "string"),
+                    "enabled",
+                    VoiceService.json("type", "boolean")),
+                new JSONArray().put("id").put("enabled")));
         result = VoiceService.json("tools", tools);
       } else if (method.equals("tools/call")) {
         JSONObject p = request.getJSONObject("params"), a = p.optJSONObject("arguments");
@@ -122,6 +158,36 @@ final class Mcp {
                   prefs.getString("sleepEnd", "07:00"),
                   "active",
                   service.sleeping());
+        } else if (name.startsWith("self.alarm.")) {
+          Alarms alarms = service.alarms();
+          if (name.endsWith(".create")) {
+            JSONObject item =
+                alarms.create(
+                    a.getString("time"),
+                    a.optString("repeat", "once"),
+                    a.optJSONArray("weekdays"),
+                    a.optInt("month_day", 0),
+                    a.optString("label", ""),
+                    LocalDateTime.now());
+            value =
+                VoiceService.json(
+                    "success", true, "id", item.optString("id"), "next_fire",
+                    item.optString("next_fire"));
+          } else if (name.endsWith(".list"))
+            value = VoiceService.json("alarms", alarms.items());
+          else if (name.endsWith(".cancel")) {
+            alarms.cancel(a.getString("id"));
+            value = VoiceService.json("success", true);
+          } else if (name.endsWith(".set_enabled")) {
+            JSONObject item =
+                alarms.setEnabled(a.getString("id"), a.getBoolean("enabled"), LocalDateTime.now());
+            value =
+                VoiceService.json(
+                    "success",
+                    true,
+                    "next_fire",
+                    item.isNull("next_fire") ? JSONObject.NULL : item.optString("next_fire"));
+          } else throw new IllegalArgumentException("未知工具");
         } else throw new IllegalArgumentException("未知工具 " + name);
         result =
             VoiceService.json(

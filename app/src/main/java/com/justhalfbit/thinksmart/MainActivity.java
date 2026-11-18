@@ -54,6 +54,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private ScrollView scroll;
   private FrameLayout frame;
   private View curtain, micRing;
+  private View alarmLayer;
+  private TextView alarmTimeView, alarmLabelView;
+  private boolean alarmShowing;
+  private String alarmLabelShown = "", alarmTimeShown = "";
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
@@ -99,7 +103,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
-              active || overlayOpen || (ambientUp && !sleeping))) {
+              active || overlayOpen || alarmShowing || (ambientUp && !sleeping))) {
             setBlack(true);
           }
           updateAmbient(now);
@@ -161,7 +165,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private void updateAmbient(long now) {
     if (ambient == null) return;
     long idleMs = now - lastInteraction;
-    if (!active && !overlayOpen && !black && idleMs >= AMBIENT_IDLE_MS) {
+    if (!active && !overlayOpen && !black && !alarmShowing && idleMs >= AMBIENT_IDLE_MS) {
       if (!ambient.isShowing()) {
         ambient.show(prefs.getBoolean(AMBIENT_MODE_PREF, false)
             ? AmbientView.Mode.PHOTO : AmbientView.Mode.INFO);
@@ -669,9 +673,74 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     frame.addView(curtain, new FrameLayout.LayoutParams(-1, -1));
     curtain.setVisibility(View.GONE);
     black = false;
+    buildAlarmLayer();
+    if (alarmShowing) showAlarmLayer();
     rendered = "";
     updateClock();
     if (snapshot != null) update(snapshot);
+  }
+
+  /** Full-screen alarm layer, above the black curtain: big time, label, stop button. */
+  private void buildAlarmLayer() {
+    LinearLayout layer = column();
+    layer.setGravity(Gravity.CENTER);
+    layer.setBackgroundColor(0xf20b1026);
+    layer.setPadding(dp(24), dp(24), dp(24), dp(24));
+    alarmTimeView = label(alarmTimeShown, 72, 0xfff2f5ff);
+    alarmTimeView.setTypeface(null, Typeface.BOLD);
+    alarmTimeView.setGravity(Gravity.CENTER);
+    layer.addView(alarmTimeView, new LinearLayout.LayoutParams(-1, -2));
+    alarmLabelView = label(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown, 22, 0xffb6c0e2);
+    alarmLabelView.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
+    labelParams.topMargin = dp(10);
+    layer.addView(alarmLabelView, labelParams);
+    Button stop = button("停止", this::dismissAlarm);
+    stop.setTextSize(18);
+    LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(dp(180), dp(56));
+    stopParams.topMargin = dp(36);
+    layer.addView(stop, stopParams);
+    layer.setOnClickListener(v -> dismissAlarm());
+    layer.setVisibility(View.GONE);
+    frame.addView(layer, new FrameLayout.LayoutParams(-1, -1));
+    alarmLayer = layer;
+  }
+
+  /** An alarm fired in the service: lift any black curtain and show the alarm layer. */
+  @Override
+  public void alarmFired(String label, String timeText) {
+    alarmLabelShown = label == null ? "" : label;
+    alarmTimeShown = timeText == null ? "" : timeText;
+    blackForSleep = false;
+    if (black) setBlack(false);
+    applyBrightness();
+    lastInteraction = SystemClock.elapsedRealtime();
+    showAlarmLayer();
+  }
+
+  /** The service stopped the ring (60 s timeout): hide the alarm layer. */
+  @Override
+  public void alarmStopped() {
+    hideAlarmLayer();
+  }
+
+  private void showAlarmLayer() {
+    if (alarmLayer == null) return;
+    alarmTimeView.setText(alarmTimeShown);
+    alarmLabelView.setText(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown);
+    alarmLayer.setVisibility(View.VISIBLE);
+    alarmLayer.bringToFront();
+    alarmShowing = true;
+  }
+
+  private void hideAlarmLayer() {
+    alarmShowing = false;
+    if (alarmLayer != null) alarmLayer.setVisibility(View.GONE);
+  }
+
+  private void dismissAlarm() {
+    hideAlarmLayer();
+    if (service != null) service.stopAlarmRinging();
   }
 
   @Override
@@ -688,6 +757,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     if (intent.getBooleanExtra("sleepRestore", false)) {
       intent.removeExtra("sleepRestore");
       restoreAfterSleep();
+    }
+    if (intent.hasExtra("alarmTime")) {
+      alarmFired(intent.getStringExtra("alarmLabel"), intent.getStringExtra("alarmTime"));
+      intent.removeExtra("alarmLabel");
+      intent.removeExtra("alarmTime");
     }
   }
 
@@ -1228,6 +1302,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   protected void onStart() {
     super.onStart();
     visible = true;
+    if (getIntent().hasExtra("alarmTime")) {
+      alarmFired(getIntent().getStringExtra("alarmLabel"), getIntent().getStringExtra("alarmTime"));
+      getIntent().removeExtra("alarmLabel");
+      getIntent().removeExtra("alarmTime");
+    }
     if (getIntent().getBooleanExtra("sleepRestore", false)
         || (blackForSleep && !inSleepWindowNow())) {
       getIntent().removeExtra("sleepRestore");
