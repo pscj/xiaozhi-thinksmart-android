@@ -39,4 +39,21 @@ final class KeywordHit {
   static boolean sentenceMentionsStopWord(String sentence) {
     return sentence != null && (sentence.contains(STOP_HALT) || sentence.contains(STOP_PAUSE));
   }
+
+  /** What a spotter hit should do about a ringing alarm, decided ahead of any turn logic. */
+  enum RingAction {
+    NONE,
+    STOP_RING,
+    STOP_RING_AND_WAKE
+  }
+
+  /**
+   * While an alarm rings, any hit silences it first: a stop word goes no
+   * further, a wake hit stops the ring and then wakes as usual. When nothing
+   * rings (or the hit is not a keyword at all), turn logic is left untouched.
+   */
+  static RingAction ringAction(Kind kind, boolean ringing) {
+    if (!ringing || kind == null || kind == Kind.NONE) return RingAction.NONE;
+    return kind == Kind.STOP ? RingAction.STOP_RING : RingAction.STOP_RING_AND_WAKE;
+  }
 }

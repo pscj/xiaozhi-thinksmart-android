@@ -680,24 +680,39 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     if (snapshot != null) update(snapshot);
   }
 
-  /** Full-screen alarm layer, above the black curtain: big time, label, stop button. */
+  /**
+   * Full-screen alarm takeover, above everything else in the frame: an opaque
+   * backdrop hides the standby/conversation UI, breathing accent rings mark
+   * the ringing state, then a huge time, the label and one big stop button.
+   * Tapping anywhere on the layer also stops the ring (see dismissAlarm).
+   */
   private void buildAlarmLayer() {
     LinearLayout layer = column();
     layer.setGravity(Gravity.CENTER);
-    layer.setBackgroundColor(0xf20b1026);
+    layer.setBackgroundColor(0xff0b1026);
     layer.setPadding(dp(24), dp(24), dp(24), dp(24));
-    alarmTimeView = label(alarmTimeShown, 72, 0xfff2f5ff);
+    layer.addView(new AlarmPulseView(this), new LinearLayout.LayoutParams(dp(104), dp(104)));
+    TextView status = label("闹钟响铃中", 16, 0xffffd68a);
+    status.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+    statusParams.topMargin = dp(14);
+    layer.addView(status, statusParams);
+    alarmTimeView = label(alarmTimeShown, 120, 0xfff2f5ff);
     alarmTimeView.setTypeface(null, Typeface.BOLD);
     alarmTimeView.setGravity(Gravity.CENTER);
-    layer.addView(alarmTimeView, new LinearLayout.LayoutParams(-1, -2));
-    alarmLabelView = label(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown, 22, 0xffb6c0e2);
+    LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(-1, -2);
+    timeParams.topMargin = dp(4);
+    layer.addView(alarmTimeView, timeParams);
+    alarmLabelView = label(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown, 26, 0xffb6c0e2);
     alarmLabelView.setGravity(Gravity.CENTER);
     LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
     labelParams.topMargin = dp(10);
     layer.addView(alarmLabelView, labelParams);
-    Button stop = button("停止", this::dismissAlarm);
-    stop.setTextSize(18);
-    LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(dp(180), dp(56));
+    Button stop = button("停止闹钟", this::dismissAlarm);
+    stop.setTextSize(22);
+    stop.setTextColor(0xff241a02);
+    stop.setBackground(card(0xffffd68a, 20));
+    LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(dp(264), dp(76));
     stopParams.topMargin = dp(36);
     layer.addView(stop, stopParams);
     layer.setOnClickListener(v -> dismissAlarm());
@@ -1233,7 +1248,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
                         : Protocol.percent(prefs.getInt("brightness", 80)))
                     / 100f);
     int keepFlag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
-    boolean keepAwake = !black && (prefs.getBoolean("keepScreen", true) || active);
+    // A showing alarm layer holds the panel on even when the keep-screen
+    // preference is off, so the full-screen alarm cannot go dark mid-ring.
+    boolean keepAwake =
+        !black && (alarmShowing || prefs.getBoolean("keepScreen", true) || active);
     int flags = keepAwake ? p.flags | keepFlag : p.flags & ~keepFlag;
     // Reapplying unchanged window attributes every second can disturb system idle handling.
     if (p.screenBrightness != brightness || p.flags != flags) {

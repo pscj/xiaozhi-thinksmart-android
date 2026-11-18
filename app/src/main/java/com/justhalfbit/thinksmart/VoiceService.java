@@ -673,9 +673,17 @@ public class VoiceService extends Service {
    * A stop word was spotted locally. Pure interruption, identical to the on-screen
    * abort button: no wake verification, no greeting, no new turn. The state gate
    * inside abort() confines it to thinking/speaking, so idle hits are no-ops.
+   * While an alarm rings, the hit only silences the alarm (voice cancel) and
+   * goes no further — checked ahead of the self-trigger guard, so the ring is
+   * stopped even if a reply happens to be playing at the same time.
    */
   private void onStopWord() {
     if (destroyed) return;
+    if (KeywordHit.ringAction(KeywordHit.Kind.STOP, ringingAlarmId != null)
+        == KeywordHit.RingAction.STOP_RING) {
+      stopAlarmRinging();
+      return;
+    }
     // Self-trigger guard: the reply now playing may itself say 停止/暂停, and the
     // microphone hears the speaker. Only the current sentence is checked.
     if (KeywordHit.sentenceMentionsStopWord(playingSentence)) {
@@ -1399,6 +1407,11 @@ public class VoiceService extends Service {
   }
 
   private void onLocalWake(byte[] pcm) {
+    // A wake hit while an alarm rings silences the alarm first (voice cancel);
+    // the wake itself then proceeds exactly as usual below.
+    if (!destroyed
+        && KeywordHit.ringAction(KeywordHit.Kind.WAKE, ringingAlarmId != null)
+            == KeywordHit.RingAction.STOP_RING_AND_WAKE) stopAlarmRinging();
     // Realtime listening is also wakeable: repeated wake phrases must not be silently ignored.
     if (destroyed || abortUntil > 0 || (manual && uploading)) return;
     verifyWake(pcm);

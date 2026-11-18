@@ -40,6 +40,24 @@ public class KeywordHitTest {
     assertEquals(KeywordHit.Kind.NONE, KeywordHit.classify("小麦小麦", "", null));
   }
 
+  @Test public void stopHitWhileRingingOnlyStopsRing() {
+    assertEquals(
+        KeywordHit.RingAction.STOP_RING, KeywordHit.ringAction(KeywordHit.Kind.STOP, true));
+  }
+
+  @Test public void wakeHitWhileRingingStopsRingAndWakes() {
+    assertEquals(
+        KeywordHit.RingAction.STOP_RING_AND_WAKE,
+        KeywordHit.ringAction(KeywordHit.Kind.WAKE, true));
+  }
+
+  @Test public void hitsWithoutRingLeaveTurnLogicAlone() {
+    assertEquals(KeywordHit.RingAction.NONE, KeywordHit.ringAction(KeywordHit.Kind.STOP, false));
+    assertEquals(KeywordHit.RingAction.NONE, KeywordHit.ringAction(KeywordHit.Kind.WAKE, false));
+    assertEquals(KeywordHit.RingAction.NONE, KeywordHit.ringAction(KeywordHit.Kind.NONE, true));
+    assertEquals(KeywordHit.RingAction.NONE, KeywordHit.ringAction(null, true));
+  }
+
   @Test public void sentenceGuardDetectsStopWords() {
     assertTrue(KeywordHit.sentenceMentionsStopWord("好的，已经停止了"));
     assertTrue(KeywordHit.sentenceMentionsStopWord("先暂停一下，我马上回来"));
