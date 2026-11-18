@@ -1422,7 +1422,7 @@ final class AmbientView extends FrameLayout {
     }
   }
 
-  // Repository serves successful cache for 3 hours; check often enough for failure retries.
+  // Repository serves successful cache for 1 hour; check often enough for failure retries.
   private static final long WEATHER_TTL_MS = AmbientRepository.WEATHER_RETRY_INTERVAL_MS;
   private static final long NEWS_TTL_MS = 30 * 60_000L;
   private static final long SHIFT_MS = 60_000L;

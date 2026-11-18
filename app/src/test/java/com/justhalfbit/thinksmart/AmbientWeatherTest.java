@@ -11,7 +11,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 /**
- * Host-side tests for the hub /kiosk/weather mapping and the 12-hour fetch gate. The payload
+ * Host-side tests for the hub /kiosk/weather mapping and the one-hour fetch gate. The payload
  * shape pinned here is the one xiaozhi-hub-server's handle_kiosk_weather returns:
  * {"location": {"name": …}, "current": {"summary": …, "details": {…}}, "forecast":
  * [{"text": …, "temp_max": …, "temp_min": …}], "source": …}. Note details is an object
@@ -163,16 +163,28 @@ public class AmbientWeatherTest {
   public void fetchGateHonoursTheInterval() {
     long now = 100 * HOUR;
     // Fresh cache: never fetch, however old the last attempt is.
-    assertFalse(AmbientRepository.weatherFetchDue(now - HOUR, 0L, now));
-    assertFalse(AmbientRepository.weatherFetchDue(now - 3 * HOUR + 1, now - 3 * HOUR + 1, now));
+    assertFalse(AmbientRepository.weatherFetchDue(now - HOUR / 2, 0L, now, false));
+    assertFalse(AmbientRepository.weatherFetchDue(now - HOUR + 1, now - HOUR + 1, now, false));
     // Stale cache and the last attempt a full interval ago: fetch.
-    assertTrue(AmbientRepository.weatherFetchDue(now - 3 * HOUR, now - 3 * HOUR, now));
-    assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 13 * HOUR, now));
+    assertTrue(AmbientRepository.weatherFetchDue(now - HOUR, now - HOUR, now, false));
+    assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 13 * HOUR, now, false));
     // No cache at all and never attempted: fetch.
-    assertTrue(AmbientRepository.weatherFetchDue(0L, 0L, now));
+    assertTrue(AmbientRepository.weatherFetchDue(0L, 0L, now, false));
     // Failed requests no longer block retries for the whole freshness window.
-    assertTrue(AmbientRepository.weatherFetchDue(0L, now - HOUR, now));
-    assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 2 * HOUR, now));
+    assertTrue(AmbientRepository.weatherFetchDue(0L, now - HOUR, now, false));
+    assertTrue(AmbientRepository.weatherFetchDue(now - 30 * HOUR, now - 2 * HOUR, now, false));
+  }
+
+  @Test
+  public void sleepSuppressesWeatherUntilAwake() {
+    long now = 100 * HOUR;
+    for (long cache : new long[] {0L, now - HOUR, now - 30 * HOUR}) {
+      assertFalse(AmbientRepository.weatherFetchDue(cache, 0L, now, true));
+      assertTrue(AmbientRepository.weatherFetchDue(cache, 0L, now, false));
+    }
+    // Waking still honors a fresh cache and the five-minute failure retry interval.
+    assertFalse(AmbientRepository.weatherFetchDue(now - HOUR / 2, 0L, now, false));
+    assertFalse(AmbientRepository.weatherFetchDue(0L, now - 60_000L, now, false));
   }
 
   @Test
@@ -180,10 +192,10 @@ public class AmbientWeatherTest {
     long now = 100 * HOUR;
     long retry = 5 * 60_000L;
     for (long cache : new long[] {0L, now - 30 * HOUR}) {
-      assertFalse(AmbientRepository.weatherFetchDue(cache, now, now));
-      assertFalse(AmbientRepository.weatherFetchDue(cache, now - retry + 1, now));
-      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry, now));
-      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry - 1, now));
+      assertFalse(AmbientRepository.weatherFetchDue(cache, now, now, false));
+      assertFalse(AmbientRepository.weatherFetchDue(cache, now - retry + 1, now, false));
+      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry, now, false));
+      assertTrue(AmbientRepository.weatherFetchDue(cache, now - retry - 1, now, false));
     }
   }
 
@@ -284,14 +296,14 @@ public class AmbientWeatherTest {
   }
 
   @Test
-  public void successfulRetryStartsThreeHourWindowAgain() {
+  public void successfulRetryStartsOneHourWindowAgain() {
     long succeeded = 100 * HOUR;
-    long expiry = succeeded + 3 * HOUR;
-    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, succeeded + 5 * 60_000L));
-    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry - 1));
-    assertTrue(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry));
+    long expiry = succeeded + HOUR;
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, succeeded + 5 * 60_000L, false));
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry - 1, false));
+    assertTrue(AmbientRepository.weatherFetchDue(succeeded, succeeded, expiry, false));
     // A failed refresh then waits five minutes; it does not make stale cache fresh.
-    assertFalse(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L - 1));
-    assertTrue(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L));
+    assertFalse(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L - 1, false));
+    assertTrue(AmbientRepository.weatherFetchDue(succeeded, expiry, expiry + 5 * 60_000L, false));
   }
 }

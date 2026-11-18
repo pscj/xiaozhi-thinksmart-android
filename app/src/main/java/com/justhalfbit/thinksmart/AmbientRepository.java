@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -60,15 +61,17 @@ final class AmbientRepository {
 
   private final SharedPreferences prefs;
   private final Supplier<String> hubHttpBase;
+  private final BooleanSupplier sleeping;
   private final OkHttpClient http =
       new OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(6, TimeUnit.SECONDS).build();
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler main = new Handler(Looper.getMainLooper());
 
-  AmbientRepository(Context context, Supplier<String> hubHttpBase) {
+  AmbientRepository(Context context, Supplier<String> hubHttpBase, BooleanSupplier sleeping) {
     this.prefs =
         context.getApplicationContext().getSharedPreferences("ambient-cache", Context.MODE_PRIVATE);
     this.hubHttpBase = hubHttpBase;
+    this.sleeping = sleeping;
   }
 
   private JSONObject getJson(String url) {
@@ -98,7 +101,7 @@ final class AmbientRepository {
     AmbientData.WeatherNow cached = cachedWeather();
     long cachedAt = cached == null ? 0L : cached.fetchedAtMs;
     long lastAttempt = prefs.getLong(KEY_WX_ATTEMPT_AT, 0L);
-    if (!weatherFetchDue(cachedAt, lastAttempt, now)) return cached;
+    if (!weatherFetchDue(cachedAt, lastAttempt, now, sleeping.getAsBoolean())) return cached;
     // Persist attempts so failures retry after five minutes even across screen/app restarts.
     prefs.edit().putLong(KEY_WX_ATTEMPT_AT, now).apply();
     String base = hubHttpBase.get();
@@ -120,10 +123,13 @@ final class AmbientRepository {
   }
 
   /**
-   * Successful cache lasts 3 hours. Without fresh cache, retry five minutes after the
-   * previous attempt. {@code cachedAtMs} is 0 when there is no usable cache.
+   * Successful cache lasts 1 hour. Without fresh cache, retry five minutes after the
+   * previous attempt. Sleep windows suppress all requests without advancing the attempt time.
+   * {@code cachedAtMs} is 0 when there is no usable cache.
    */
-  static boolean weatherFetchDue(long cachedAtMs, long lastAttemptMs, long nowMs) {
+  static boolean weatherFetchDue(
+      long cachedAtMs, long lastAttemptMs, long nowMs, boolean sleeping) {
+    if (sleeping) return false;
     if (cachedAtMs > 0L && nowMs - cachedAtMs < WEATHER_MIN_INTERVAL_MS) return false;
     return lastAttemptMs <= 0L || nowMs - lastAttemptMs >= WEATHER_RETRY_INTERVAL_MS;
   }
@@ -412,8 +418,8 @@ final class AmbientRepository {
     return new AmbientData.NewsFeed("", FALLBACK_NEWS, false);
   }
 
-  /** Successful weather readings remain fresh for 3 hours. */
-  static final long WEATHER_MIN_INTERVAL_MS = 3 * 60 * 60_000L;
+  /** Successful weather readings remain fresh for 1 hour. */
+  static final long WEATHER_MIN_INTERVAL_MS = 60 * 60_000L;
   static final long WEATHER_RETRY_INTERVAL_MS = 5 * 60_000L;
 
   private static final int MAX_NEWS_ITEMS = 8;

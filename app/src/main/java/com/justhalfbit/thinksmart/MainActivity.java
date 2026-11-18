@@ -660,7 +660,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     java.io.File photosDir =
         new java.io.File(externalFiles != null ? externalFiles : getFilesDir(), "photos");
     ambient.bind(
-        new AmbientRepository(this, () -> prefs.getString("http", "")),
+        new AmbientRepository(this, () -> prefs.getString("http", ""), this::inSleepWindowNow),
         photosDir,
         this::displayedWakePhrase);
     if (prefs.getBoolean(AMBIENT_MODE_PREF, false)) ambient.preparePhotos();
