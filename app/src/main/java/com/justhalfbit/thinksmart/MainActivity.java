@@ -706,12 +706,13 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         glow,
         new FrameLayout.LayoutParams(
             dp(768), dp(392), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
-    // Breathing rings centered on the time block, about a third down the
-    // screen; the larger ring intentionally bleeds off the edges, as drawn
-    // in the design.
+    // Breathing rings centered on the time block. The 400dp view puts the
+    // outer ring at about 396dp across with its center 230dp down, so even
+    // at full breathing swell both rings stay fully on screen (the earlier
+    // 520dp view pushed the outer ring's top arc off the top edge).
     FrameLayout.LayoutParams pulseParams =
-        new FrameLayout.LayoutParams(dp(520), dp(520), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-    pulseParams.topMargin = dp(-80);
+        new FrameLayout.LayoutParams(dp(400), dp(400), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    pulseParams.topMargin = dp(30);
     layer.addView(new AlarmPulseView(this), pulseParams);
     LinearLayout texts = column();
     texts.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -740,7 +741,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     Button stop = new Button(this);
     stop.setText("停止");
     stop.setAllCaps(false);
-    stop.setTextSize(20);
+    stop.setTextSize(24);
     stop.setTextColor(0xffffffff);
     stop.setLetterSpacing(0.5f);
     GradientDrawable capsule = new GradientDrawable();
@@ -750,7 +751,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     stop.setBackground(capsule);
     // Letter spacing also lands after the last glyph; pad the start by one
     // space so the two glyphs sit centered in the capsule.
-    stop.setPadding(dp(44) + Math.round(0.5f * stop.getTextSize()), dp(14), dp(44), dp(14));
+    stop.setPadding(dp(64) + Math.round(0.5f * stop.getTextSize()), dp(18), dp(64), dp(18));
     stop.setOnClickListener(
         v -> {
           touch();
