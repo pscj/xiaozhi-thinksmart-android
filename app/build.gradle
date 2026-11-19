@@ -2,9 +2,15 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.justhalfbit.thinksmart'
     compileSdk 34
-    defaultConfig { applicationId 'com.justhalfbit.thinksmart'; minSdk 26; targetSdk 34; versionCode 3; versionName '0.2.1'; ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' } }
+    defaultConfig { applicationId 'com.justhalfbit.thinksmart'; minSdk 26; targetSdk 34; versionCode 3; versionName '0.2.1'; ndk { abiFilters 'armeabi-v7a' } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
-    packaging { jniLibs { useLegacyPackaging true } }
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+            // The Android keyword spotter uses the JNI library and ONNX Runtime.
+            excludes += ['**/libsherpa-onnx-c-api.so', '**/libsherpa-onnx-cxx-api.so']
+        }
+    }
     androidResources { noCompress += ['onnx'] }
     lint { abortOnError true }
 }
