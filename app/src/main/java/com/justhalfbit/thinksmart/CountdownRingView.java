@@ -7,9 +7,10 @@ import android.graphics.RectF;
 import android.view.View;
 
 /**
- * Progress ring for the full-screen countdown, in the dawn ringing
- * screen's geometry (same 400dp carrier and outer diameter as
- * AlarmPulseView): a faint warm-white full circle is the elapsed ghost,
+ * Progress ring for the full-screen countdown, in a 310dp carrier of
+ * its own (smaller than the ringing screen's pulse view, so the ring
+ * clears the countdown screen's bottom stack): a faint warm-white full
+ * circle is the elapsed ghost,
  * and a bright warm-white arc on top is the time remaining. The arc
  * always ends at twelve o'clock and its start chases clockwise as time
  * passes, so the ring visibly depletes clockwise from the top. When the

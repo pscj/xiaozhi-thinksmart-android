@@ -841,8 +841,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     button.setLetterSpacing(0.5f);
     GradientDrawable capsule = new GradientDrawable();
     if (cancelStyle) {
-      capsule.setColor(0x24ff7860);
-      capsule.setStroke(dp(1), 0x99ff8066);
+      capsule.setColor(0x59ff7860);
+      capsule.setStroke(dp(1), 0xbfff8674);
     } else {
       capsule.setColor(0x3dffffff);
       capsule.setStroke(dp(1), 0x73ffffff);
@@ -881,18 +881,24 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         glow,
         new FrameLayout.LayoutParams(
             dp(768), dp(392), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
-    // Same carrier geometry as the ringing screen's pulse view, so the
-    // ring (about 396dp across, centered 230dp down) stays fully on screen.
+    // The carrier is sized against the bottom stack, not copied from the
+    // ringing screen: at 310dp (ring about 307dp across, centered 187dp
+    // down) the ring's bottom edge clears the other-timers line and the
+    // button row, and its top edge keeps a margin from the screen top.
     FrameLayout.LayoutParams ringParams =
-        new FrameLayout.LayoutParams(dp(400), dp(400), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-    ringParams.topMargin = dp(30);
+        new FrameLayout.LayoutParams(dp(310), dp(310), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    ringParams.topMargin = dp(32);
     countdownRing = new CountdownRingView(this);
     layer.addView(countdownRing, ringParams);
     LinearLayout texts = column();
-    texts.setGravity(Gravity.CENTER_HORIZONTAL);
+    texts.setGravity(Gravity.CENTER);
+    // The text column shares the ring carrier's box and centers its
+    // children in it, so the whole block (the time, plus the badge and
+    // the label when they show) stays centered on the ring's center
+    // whatever combination of rows is visible.
     FrameLayout.LayoutParams textsParams =
-        new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-    textsParams.topMargin = dp(76);
+        new FrameLayout.LayoutParams(-1, dp(310), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    textsParams.topMargin = dp(32);
     layer.addView(texts, textsParams);
     countdownTimeView = label("", 120, 0xffffffff);
     countdownTimeView.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
