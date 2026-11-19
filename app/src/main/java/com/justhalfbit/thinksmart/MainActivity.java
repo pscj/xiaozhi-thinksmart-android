@@ -721,16 +721,27 @@ public class MainActivity extends Activity implements VoiceService.Listener {
             GradientDrawable.Orientation.TOP_BOTTOM,
             new int[] {0xff0d1838, 0xff1d3263, 0xff4a4478, 0xff9c5f6d, 0xffe07f4e, 0xffffb877}));
     // Warm dawn glow rising from the bottom edge, behind everything else.
+    // The glow view is deliberately far taller than the visible band and
+    // starts above the screen. At 392dp tall anchored to the bottom, the
+    // view's top edge sat 141dp down the screen, where the radial gradient
+    // still carries about a quarter of its peak alpha, so that hard edge
+    // clipped the glow and read as a horizontal line across the gradient
+    // (the same line the countdown layer showed before its fix). At 768dp
+    // tall with a -47dp top margin the view's center — and with it the
+    // gradient's — stays exactly where the 392dp form put it (337dp down
+    // the screen), while the top edge, where the gradient has faded to
+    // zero, sits off-screen. Every on-screen glow value is unchanged;
+    // only the line is gone.
     View glow = new View(this);
     GradientDrawable glowDrawable = new GradientDrawable();
     glowDrawable.setGradientType(GradientDrawable.RADIAL_GRADIENT);
     glowDrawable.setColors(new int[] {0x80ffb066, 0x00ffb066});
     glowDrawable.setGradientRadius(dp(384));
     glow.setBackground(glowDrawable);
-    layer.addView(
-        glow,
-        new FrameLayout.LayoutParams(
-            dp(768), dp(392), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+    FrameLayout.LayoutParams glowParams =
+        new FrameLayout.LayoutParams(dp(768), dp(768), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    glowParams.topMargin = dp(-47);
+    layer.addView(glow, glowParams);
     // Breathing rings centered on the time block. The 400dp view puts the
     // outer ring at about 396dp across with its center 230dp down, so even
     // at full breathing swell both rings stay fully on screen (the earlier
