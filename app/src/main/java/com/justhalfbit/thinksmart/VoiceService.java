@@ -1023,7 +1023,8 @@ public class VoiceService extends Service {
       } else if (phase.equals("sentence_start") && !muted) {
         listenDuringReply();
         playingSentence = msg.optString("text");
-        message("小麦", msg.optString("text"));
+        // 只念不记的播报（如闹钟执行结果）：只出声，不上屏、不进聊天记录。
+        if (!msg.optBoolean("announce")) message("小麦", msg.optString("text"));
         setState("回复中");
       } else if (phase.equals("stop") && !muted) {
         playingSentence = "";
