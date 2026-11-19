@@ -55,7 +55,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private FrameLayout frame;
   private View curtain, micRing;
   private View alarmLayer;
-  private TextView alarmTimeView, alarmLabelView;
+  private TextView alarmTimeView, alarmLabelView, alarmDateView;
   private boolean alarmShowing;
   private String alarmLabelShown = "", alarmTimeShown = "";
   private View volumeHud;
@@ -681,39 +681,84 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   }
 
   /**
-   * Full-screen alarm takeover, above everything else in the frame: an opaque
-   * backdrop hides the standby/conversation UI, breathing accent rings mark
-   * the ringing state, then a huge time, the label and one big stop button.
-   * Tapping anywhere on the layer also stops the ring (see dismissAlarm).
+   * Full-screen alarm takeover in the dawn design, above everything else in
+   * the frame: a deep-blue to warm-orange gradient with a soft glow at the
+   * bottom hides the standby/conversation UI; thin breathing rings circle a
+   * huge thin white time, the alarm's own label (the row is hidden when the
+   * alarm has no label) and the date, and one translucent capsule stop
+   * button sits at the bottom. Tapping anywhere on the layer also stops the
+   * ring (see dismissAlarm).
    */
   private void buildAlarmLayer() {
-    LinearLayout layer = column();
-    layer.setGravity(Gravity.CENTER);
-    layer.setBackgroundColor(0xff0b1026);
-    layer.setPadding(dp(24), dp(24), dp(24), dp(24));
-    layer.addView(new AlarmPulseView(this), new LinearLayout.LayoutParams(dp(104), dp(104)));
-    TextView status = label("闹钟响铃中", 16, 0xffffd68a);
-    status.setGravity(Gravity.CENTER);
-    LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
-    statusParams.topMargin = dp(14);
-    layer.addView(status, statusParams);
-    alarmTimeView = label(alarmTimeShown, 120, 0xfff2f5ff);
-    alarmTimeView.setTypeface(null, Typeface.BOLD);
+    FrameLayout layer = new FrameLayout(this);
+    layer.setBackground(
+        new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[] {0xff0d1838, 0xff1d3263, 0xff4a4478, 0xff9c5f6d, 0xffe07f4e, 0xffffb877}));
+    // Warm dawn glow rising from the bottom edge, behind everything else.
+    View glow = new View(this);
+    GradientDrawable glowDrawable = new GradientDrawable();
+    glowDrawable.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+    glowDrawable.setColors(new int[] {0x80ffb066, 0x00ffb066});
+    glowDrawable.setGradientRadius(dp(384));
+    glow.setBackground(glowDrawable);
+    layer.addView(
+        glow,
+        new FrameLayout.LayoutParams(
+            dp(768), dp(392), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+    // Breathing rings centered on the time block, about a third down the
+    // screen; the larger ring intentionally bleeds off the edges, as drawn
+    // in the design.
+    FrameLayout.LayoutParams pulseParams =
+        new FrameLayout.LayoutParams(dp(520), dp(520), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    pulseParams.topMargin = dp(-80);
+    layer.addView(new AlarmPulseView(this), pulseParams);
+    LinearLayout texts = column();
+    texts.setGravity(Gravity.CENTER_HORIZONTAL);
+    FrameLayout.LayoutParams textsParams =
+        new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    textsParams.topMargin = dp(76);
+    layer.addView(texts, textsParams);
+    alarmTimeView = label(alarmTimeShown, 120, 0xffffffff);
+    alarmTimeView.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+    alarmTimeView.setLetterSpacing(0.02f);
     alarmTimeView.setGravity(Gravity.CENTER);
-    LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(-1, -2);
-    timeParams.topMargin = dp(4);
-    layer.addView(alarmTimeView, timeParams);
-    alarmLabelView = label(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown, 26, 0xffb6c0e2);
+    texts.addView(alarmTimeView, new LinearLayout.LayoutParams(-1, -2));
+    alarmLabelView = label(alarmLabelShown, 22, 0xe6ffffff);
+    alarmLabelView.setLetterSpacing(0.5f);
     alarmLabelView.setGravity(Gravity.CENTER);
+    alarmLabelView.setVisibility(alarmLabelShown.isEmpty() ? View.GONE : View.VISIBLE);
     LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
-    labelParams.topMargin = dp(10);
-    layer.addView(alarmLabelView, labelParams);
-    Button stop = button("停止闹钟", this::dismissAlarm);
-    stop.setTextSize(22);
-    stop.setTextColor(0xff241a02);
-    stop.setBackground(card(0xffffd68a, 20));
-    LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(dp(264), dp(76));
-    stopParams.topMargin = dp(36);
+    labelParams.topMargin = dp(18);
+    texts.addView(alarmLabelView, labelParams);
+    alarmDateView = label("", 16, 0xb8ffffff);
+    alarmDateView.setLetterSpacing(0.22f);
+    alarmDateView.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-1, -2);
+    dateParams.topMargin = dp(12);
+    texts.addView(alarmDateView, dateParams);
+    Button stop = new Button(this);
+    stop.setText("停止");
+    stop.setAllCaps(false);
+    stop.setTextSize(20);
+    stop.setTextColor(0xffffffff);
+    stop.setLetterSpacing(0.5f);
+    GradientDrawable capsule = new GradientDrawable();
+    capsule.setColor(0x3dffffff);
+    capsule.setCornerRadius(dp(40));
+    capsule.setStroke(dp(1), 0x73ffffff);
+    stop.setBackground(capsule);
+    // Letter spacing also lands after the last glyph; pad the start by one
+    // space so the two glyphs sit centered in the capsule.
+    stop.setPadding(dp(44) + Math.round(0.5f * stop.getTextSize()), dp(14), dp(44), dp(14));
+    stop.setOnClickListener(
+        v -> {
+          touch();
+          dismissAlarm();
+        });
+    FrameLayout.LayoutParams stopParams =
+        new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    stopParams.bottomMargin = dp(58);
     layer.addView(stop, stopParams);
     layer.setOnClickListener(v -> dismissAlarm());
     layer.setVisibility(View.GONE);
@@ -742,7 +787,9 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private void showAlarmLayer() {
     if (alarmLayer == null) return;
     alarmTimeView.setText(alarmTimeShown);
-    alarmLabelView.setText(alarmLabelShown.isEmpty() ? "闹钟" : alarmLabelShown);
+    alarmLabelView.setText(alarmLabelShown);
+    alarmLabelView.setVisibility(alarmLabelShown.isEmpty() ? View.GONE : View.VISIBLE);
+    alarmDateView.setText(new SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(new Date()));
     alarmLayer.setVisibility(View.VISIBLE);
     alarmLayer.bringToFront();
     alarmShowing = true;

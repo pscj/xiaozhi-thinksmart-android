@@ -7,8 +7,9 @@ import android.media.AudioTrack;
 import android.util.Log;
 
 /**
- * Locally synthesized alarm chime: a three-note sine bell sequence baked into
- * one PCM buffer and looped through a static AudioTrack, following the
+ * Locally synthesized alarm sound: the classic digital-alarm beep — a 2 kHz
+ * tone with light harmonics, four short beeps per group — baked into one PCM
+ * buffer and looped through a static AudioTrack, following the
  * previewRecentAudio pattern in AudioEngine. No audio assets and no new
  * dependencies; plays on the media stream at its current volume (the system
  * volume is never touched). The buffer ends in silence so the loop point is
@@ -69,23 +70,35 @@ final class AlarmSound {
     return track != null;
   }
 
-  /** E6–G6–C7 bell notes with a soft harmonic and a raised-cosine envelope. */
+  /**
+   * One 1.2 s beep group: four 0.1 s beeps of 2 kHz (fundamental plus light
+   * harmonics) spaced 0.1 s apart, then 0.4 s of silence before the group
+   * loops. Short raised-cosine edges keep every beep click-free.
+   */
   private static byte[] synthesize() {
-    double[] notes = {1318.51, 1567.98, 2093.00};
-    int noteSamples = (int) (RATE * 0.16), gapSamples = (int) (RATE * 0.05);
-    int tailSamples = (int) (RATE * 0.8);
-    int total = notes.length * noteSamples + (notes.length - 1) * gapSamples + tailSamples;
+    int beepSamples = (int) (RATE * 0.1), gapSamples = (int) (RATE * 0.1);
+    int tailSamples = (int) (RATE * 0.4);
+    int total = 4 * (beepSamples + gapSamples) + tailSamples;
     byte[] out = new byte[total * 2];
+    int edge = (int) (RATE * 0.004);
     int pos = 0;
-    for (double freq : notes) {
-      for (int i = 0; i < noteSamples; i++) {
+    for (int beep = 0; beep < 4; beep++) {
+      for (int i = 0; i < beepSamples; i++) {
         double t = i / (double) RATE;
-        double envelope = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / noteSamples);
+        double envelope = 1;
+        if (i < edge) {
+          envelope = 0.5 - 0.5 * Math.cos(Math.PI * i / edge);
+        } else if (i >= beepSamples - edge) {
+          int j = i - (beepSamples - edge);
+          envelope = 0.5 + 0.5 * Math.cos(Math.PI * j / edge);
+        }
         double sample =
-            Math.sin(2 * Math.PI * freq * t) + 0.3 * Math.sin(4 * Math.PI * freq * t);
-        writeSample(out, pos++, 0.45 * envelope * sample / 1.3);
+            Math.sin(2 * Math.PI * 2000 * t)
+                + 0.25 * Math.sin(4 * Math.PI * 2000 * t)
+                + 0.1 * Math.sin(6 * Math.PI * 2000 * t);
+        writeSample(out, pos++, 0.62 * envelope * sample / 1.35);
       }
-      pos += gapSamples; // zero-filled silence between notes
+      pos += gapSamples; // zero-filled silence between beeps
     }
     return out;
   }
