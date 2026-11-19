@@ -61,8 +61,12 @@ public class VoiceService extends Service {
 
   private ChatLog chats;
   private Alarms alarms;
+  private Timers timers;
   private final AlarmSound alarmSound = new AlarmSound();
-  private String ringingAlarmId;
+  // The single ring slot, shared by alarms and timers: ringingId is the
+  // fired entry's id and ringingIsTimer says which store it came from.
+  private String ringingId;
+  private boolean ringingIsTimer;
   private long ringingSince;
   private String chatDevice;
   private ManagementClient management;
@@ -96,6 +100,7 @@ public class VoiceService extends Service {
             refreshReports(false);
           }
           checkAlarms();
+          checkTimers();
           publish();
           io.postDelayed(this, 1000);
         }
@@ -222,6 +227,8 @@ public class VoiceService extends Service {
     saveChats();
     alarms = new Alarms(prefs.getString("alarmsV1", "[]"));
     alarms.setChangedListener(this::saveAlarms);
+    timers = new Timers(prefs.getString("timersV1", "[]"));
+    timers.setChangedListener(this::saveTimers);
     try {
       wakeMatcher = new WakeMatcher(getAssets().open("kws-zh/pinyin.txt"));
     } catch (java.io.IOException ignored) {
@@ -402,14 +409,24 @@ public class VoiceService extends Service {
     prefs.edit().putString("alarmsV1", alarms.encode()).apply();
   }
 
+  /** Device-local countdown timers behind the self.timer.* MCP tools (see Timers). */
+  public Timers timers() {
+    return timers;
+  }
+
+  private void saveTimers() {
+    prefs.edit().putString("timersV1", timers.encode()).apply();
+  }
+
   /**
    * Per-second alarm check on the io thread: advance a due entry's state,
    * start the local chime and bring the alarm screen forward. A ring nobody
-   * stops ends after 60 s; only one alarm rings at a time.
+   * stops ends after 60 s; the ring slot is shared with timers, and alarms
+   * win it because this check runs first each tick.
    */
   private void checkAlarms() {
     if (alarms == null) return;
-    if (ringingAlarmId != null) {
+    if (ringingId != null) {
       if (SystemClock.elapsedRealtime() - ringingSince >= 60000) stopAlarmRinging();
       return;
     }
@@ -419,21 +436,102 @@ public class VoiceService extends Service {
     String id = due.optString("id"), label = due.optString("label", ""),
         timeText = due.optString("time", "");
     alarms.markFired(id, now);
-    ringingAlarmId = id;
+    ringingId = id;
+    ringingIsTimer = false;
     ringingSince = SystemClock.elapsedRealtime();
     alarmSound.start();
     fireAlarmUi(label, timeText);
   }
 
-  /** Stop the ringing alarm: user tap, stop button, or the 60 s timeout. */
+  /**
+   * Per-second timer check, right after the alarm check: a due timer is
+   * removed at once (it fires exactly once) and rings through the same
+   * path as an alarm, with "00:00" as its big text. While the ring slot is
+   * busy the due entry simply stays due and fires on the next tick after
+   * the slot frees. Because ends_at is persisted, a timer that expired
+   * while the process was dead is due on the very first tick after
+   * startup and rings then.
+   */
+  private void checkTimers() {
+    if (timers == null || ringingId != null) return;
+    JSONObject due = timers.dueItem(System.currentTimeMillis());
+    if (due == null) return;
+    String id = due.optString("id"), label = due.optString("label", "");
+    timers.remove(id);
+    ringingId = id;
+    ringingIsTimer = true;
+    ringingSince = SystemClock.elapsedRealtime();
+    alarmSound.start();
+    fireAlarmUi(label, "00:00");
+  }
+
+  /** Stop the current ring (alarm or timer): user tap, stop button, or the 60 s timeout. */
   public void stopAlarmRinging() {
     io.post(
         () -> {
-          if (ringingAlarmId == null) return;
-          ringingAlarmId = null;
+          if (ringingId == null) return;
+          ringingId = null;
+          ringingIsTimer = false;
           alarmSound.stop();
           Listener current = listener;
           if (current != null) main.post(current::alarmStopped);
+        });
+  }
+
+  /**
+   * What the full-screen countdown shows, as copies safe to read on the UI
+   * thread: {item: the display entry with derived remaining_sec, total,
+   * next: the runner-up entry when several timers coexist}. Null when no
+   * timer is running or paused.
+   */
+  public JSONObject timerDisplayState() {
+    if (timers == null) return null;
+    long nowMs = System.currentTimeMillis();
+    JSONObject item = timers.displayCopy(nowMs);
+    if (item == null) return null;
+    try {
+      JSONObject state = new JSONObject();
+      state.put("item", item);
+      state.put("total", timers.size());
+      JSONObject next = timers.runnerUpCopy(nowMs, item.optString("id"));
+      if (next != null) state.put("next", next);
+      return state;
+    } catch (JSONException e) {
+      return null;
+    }
+  }
+
+  /** Countdown-screen buttons: applied on the io thread like other timer writes. */
+  public void timerPause(String id) {
+    io.post(
+        () -> {
+          if (timers == null) return;
+          try {
+            timers.pause(id, System.currentTimeMillis());
+          } catch (RuntimeException ignored) {
+          }
+        });
+  }
+
+  public void timerResume(String id) {
+    io.post(
+        () -> {
+          if (timers == null) return;
+          try {
+            timers.resume(id, System.currentTimeMillis());
+          } catch (RuntimeException ignored) {
+          }
+        });
+  }
+
+  public void timerCancel(String id) {
+    io.post(
+        () -> {
+          if (timers == null) return;
+          try {
+            timers.cancel(id);
+          } catch (RuntimeException ignored) {
+          }
         });
   }
 
@@ -679,7 +777,7 @@ public class VoiceService extends Service {
    */
   private void onStopWord() {
     if (destroyed) return;
-    if (KeywordHit.ringAction(KeywordHit.Kind.STOP, ringingAlarmId != null)
+    if (KeywordHit.ringAction(KeywordHit.Kind.STOP, ringingId != null)
         == KeywordHit.RingAction.STOP_RING) {
       stopAlarmRinging();
       return;
@@ -1411,7 +1509,7 @@ public class VoiceService extends Service {
     // A wake hit while an alarm rings silences the alarm first (voice cancel);
     // the wake itself then proceeds exactly as usual below.
     if (!destroyed
-        && KeywordHit.ringAction(KeywordHit.Kind.WAKE, ringingAlarmId != null)
+        && KeywordHit.ringAction(KeywordHit.Kind.WAKE, ringingId != null)
             == KeywordHit.RingAction.STOP_RING_AND_WAKE) stopAlarmRinging();
     // Realtime listening is also wakeable: repeated wake phrases must not be silently ignored.
     if (destroyed || abortUntil > 0 || (manual && uploading)) return;

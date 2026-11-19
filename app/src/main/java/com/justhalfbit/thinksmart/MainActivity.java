@@ -58,6 +58,16 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private TextView alarmTimeView, alarmLabelView, alarmDateView;
   private boolean alarmShowing;
   private String alarmLabelShown = "", alarmTimeShown = "";
+  private View countdownLayer;
+  private CountdownRingView countdownRing;
+  private TextView countdownTimeView,
+      countdownLabelView,
+      countdownBadgeView,
+      countdownMultiView,
+      countdownHintView;
+  private Button countdownToggleButton, countdownCancelButton;
+  private boolean countdownShowing;
+  private String countdownShownId = "", countdownDismissedId = "", countdownShownState = "";
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
@@ -103,9 +113,14 @@ public class MainActivity extends Activity implements VoiceService.Listener {
               now,
               lastInteraction,
               prefs.getBoolean("autoOff", true) ? prefs.getInt("offMinutes", 5) : 0,
-              active || overlayOpen || alarmShowing || (ambientUp && !sleeping))) {
+              active
+                  || overlayOpen
+                  || alarmShowing
+                  || (countdownShowing && !sleeping)
+                  || (ambientUp && !sleeping))) {
             setBlack(true);
           }
+          updateCountdown();
           updateAmbient(now);
           ui.postDelayed(this, 1000);
         }
@@ -165,7 +180,12 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private void updateAmbient(long now) {
     if (ambient == null) return;
     long idleMs = now - lastInteraction;
-    if (!active && !overlayOpen && !black && !alarmShowing && idleMs >= AMBIENT_IDLE_MS) {
+    if (!active
+        && !overlayOpen
+        && !black
+        && !alarmShowing
+        && !countdownShowing
+        && idleMs >= AMBIENT_IDLE_MS) {
       if (!ambient.isShowing()) {
         ambient.show(prefs.getBoolean(AMBIENT_MODE_PREF, false)
             ? AmbientView.Mode.PHOTO : AmbientView.Mode.INFO);
@@ -666,6 +686,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     if (prefs.getBoolean(AMBIENT_MODE_PREF, false)) ambient.preparePhotos();
     // Below the black curtain: the curtain still wins when the screen blanks.
     frame.addView(ambient, new FrameLayout.LayoutParams(-1, -1));
+    // The countdown layer also sits below the curtain (sleep black-out wins)
+    // but above the standby screen it replaces.
+    countdownShowing = false;
+    countdownShownId = "";
+    buildCountdownLayer();
     curtain = new View(this);
     curtain.setBackgroundColor(Color.BLACK);
     curtain.setContentDescription("触摸恢复屏幕");
@@ -804,6 +829,230 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private void dismissAlarm() {
     hideAlarmLayer();
     if (service != null) service.stopAlarmRinging();
+  }
+
+  /** One translucent capsule button in the ringing screen's style. */
+  private Button dawnCapsule(String text, boolean cancelStyle) {
+    Button button = new Button(this);
+    button.setText(text);
+    button.setAllCaps(false);
+    button.setTextSize(24);
+    button.setTextColor(0xffffffff);
+    button.setLetterSpacing(0.5f);
+    GradientDrawable capsule = new GradientDrawable();
+    if (cancelStyle) {
+      capsule.setColor(0x24ff7860);
+      capsule.setStroke(dp(1), 0x99ff8066);
+    } else {
+      capsule.setColor(0x3dffffff);
+      capsule.setStroke(dp(1), 0x73ffffff);
+    }
+    capsule.setCornerRadius(dp(40));
+    button.setBackground(capsule);
+    // Letter spacing also lands after the last glyph; pad the start by one
+    // space so the glyphs sit centered in the capsule.
+    button.setPadding(dp(64) + Math.round(0.5f * button.getTextSize()), dp(18), dp(64), dp(18));
+    return button;
+  }
+
+  /**
+   * Full-screen countdown in the same dawn design as the ringing screen:
+   * the gradient and glow, a progress ring that depletes clockwise from
+   * twelve o'clock around the big thin remaining time, the timer's own
+   * label (hidden when it has none) and pause/cancel capsules at the
+   * bottom. Unlike the ringing layer, tapping the layer itself does NOT
+   * stop anything — it only leaves the screen while the timer keeps
+   * running (see updateCountdown); the cancel capsule is the way to end
+   * a timer from here.
+   */
+  private void buildCountdownLayer() {
+    FrameLayout layer = new FrameLayout(this);
+    layer.setBackground(
+        new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[] {0xff0d1838, 0xff1d3263, 0xff4a4478, 0xff9c5f6d, 0xffe07f4e, 0xffffb877}));
+    View glow = new View(this);
+    GradientDrawable glowDrawable = new GradientDrawable();
+    glowDrawable.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+    glowDrawable.setColors(new int[] {0x80ffb066, 0x00ffb066});
+    glowDrawable.setGradientRadius(dp(384));
+    glow.setBackground(glowDrawable);
+    layer.addView(
+        glow,
+        new FrameLayout.LayoutParams(
+            dp(768), dp(392), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+    // Same carrier geometry as the ringing screen's pulse view, so the
+    // ring (about 396dp across, centered 230dp down) stays fully on screen.
+    FrameLayout.LayoutParams ringParams =
+        new FrameLayout.LayoutParams(dp(400), dp(400), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    ringParams.topMargin = dp(30);
+    countdownRing = new CountdownRingView(this);
+    layer.addView(countdownRing, ringParams);
+    LinearLayout texts = column();
+    texts.setGravity(Gravity.CENTER_HORIZONTAL);
+    FrameLayout.LayoutParams textsParams =
+        new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+    textsParams.topMargin = dp(76);
+    layer.addView(texts, textsParams);
+    countdownTimeView = label("", 120, 0xffffffff);
+    countdownTimeView.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+    countdownTimeView.setLetterSpacing(0.02f);
+    countdownTimeView.setGravity(Gravity.CENTER);
+    texts.addView(countdownTimeView, new LinearLayout.LayoutParams(-1, -2));
+    countdownBadgeView = label("❚❚ 已暂停", 15, 0xd9ffffff);
+    countdownBadgeView.setLetterSpacing(0.34f);
+    countdownBadgeView.setGravity(Gravity.CENTER);
+    GradientDrawable badge = new GradientDrawable();
+    badge.setColor(0x24ffffff);
+    badge.setCornerRadius(dp(20));
+    badge.setStroke(dp(1), 0x47ffffff);
+    countdownBadgeView.setBackground(badge);
+    countdownBadgeView.setPadding(dp(16) + Math.round(0.34f * dp(15)), dp(6), dp(16), dp(6));
+    countdownBadgeView.setVisibility(View.GONE);
+    LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(-2, -2);
+    badgeParams.topMargin = dp(14);
+    badgeParams.gravity = Gravity.CENTER_HORIZONTAL;
+    texts.addView(countdownBadgeView, badgeParams);
+    countdownLabelView = label("", 22, 0xe6ffffff);
+    countdownLabelView.setLetterSpacing(0.5f);
+    countdownLabelView.setGravity(Gravity.CENTER);
+    countdownLabelView.setVisibility(View.GONE);
+    LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
+    labelParams.topMargin = dp(18);
+    texts.addView(countdownLabelView, labelParams);
+    // Bottom stack: the other-timers line, the two capsules, the exit hint.
+    LinearLayout bottom = column();
+    bottom.setGravity(Gravity.CENTER_HORIZONTAL);
+    FrameLayout.LayoutParams bottomParams =
+        new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    bottomParams.bottomMargin = dp(24);
+    layer.addView(bottom, bottomParams);
+    countdownMultiView = label("", 16, 0xd1ffffff);
+    countdownMultiView.setLetterSpacing(0.14f);
+    countdownMultiView.setGravity(Gravity.CENTER);
+    GradientDrawable multi = new GradientDrawable();
+    multi.setColor(0x21ffffff);
+    multi.setCornerRadius(dp(20));
+    multi.setStroke(dp(1), 0x33ffffff);
+    countdownMultiView.setBackground(multi);
+    countdownMultiView.setPadding(dp(20) + Math.round(0.14f * dp(16)), dp(8), dp(20), dp(8));
+    countdownMultiView.setVisibility(View.GONE);
+    LinearLayout.LayoutParams multiParams = new LinearLayout.LayoutParams(-2, -2);
+    multiParams.gravity = Gravity.CENTER_HORIZONTAL;
+    bottom.addView(countdownMultiView, multiParams);
+    LinearLayout buttons = new LinearLayout(this);
+    buttons.setOrientation(LinearLayout.HORIZONTAL);
+    buttons.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams buttonsParams = new LinearLayout.LayoutParams(-2, -2);
+    buttonsParams.topMargin = dp(14);
+    buttonsParams.gravity = Gravity.CENTER_HORIZONTAL;
+    bottom.addView(buttons, buttonsParams);
+    countdownToggleButton = dawnCapsule("暂停", false);
+    countdownToggleButton.setOnClickListener(
+        v -> {
+          if (service == null || countdownShownId.isEmpty()) return;
+          if ("paused".equals(countdownShownState)) service.timerResume(countdownShownId);
+          else service.timerPause(countdownShownId);
+        });
+    buttons.addView(countdownToggleButton, new LinearLayout.LayoutParams(-2, -2));
+    countdownCancelButton = dawnCapsule("取消", true);
+    countdownCancelButton.setOnClickListener(
+        v -> {
+          if (service == null || countdownShownId.isEmpty()) return;
+          service.timerCancel(countdownShownId);
+        });
+    LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-2, -2);
+    cancelParams.leftMargin = dp(24);
+    buttons.addView(countdownCancelButton, cancelParams);
+    countdownHintView = label("点按其他区域返回 · 计时继续", 15, 0x8cffffff);
+    countdownHintView.setLetterSpacing(0.2f);
+    countdownHintView.setGravity(Gravity.CENTER);
+    LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+    hintParams.topMargin = dp(14);
+    bottom.addView(countdownHintView, hintParams);
+    layer.setOnClickListener(v -> exitCountdownLayer());
+    layer.setVisibility(View.GONE);
+    frame.addView(layer, new FrameLayout.LayoutParams(-1, -1));
+    countdownLayer = layer;
+  }
+
+  /**
+   * Per-second countdown-screen upkeep, from the tick. The screen takes
+   * the standby screen's place while a timer runs or is paused, but it
+   * yields to everything else: an active conversation, an overlay, the
+   * black curtain (sleep window included) and the ringing layer all hide
+   * it, and the timer itself keeps running in the service regardless.
+   */
+  private void updateCountdown() {
+    if (countdownLayer == null) return;
+    JSONObject state = service == null ? null : service.timerDisplayState();
+    JSONObject item = state == null ? null : state.optJSONObject("item");
+    boolean show =
+        item != null
+            && !active
+            && !overlayOpen
+            && !black
+            && !alarmShowing
+            && !inSleepWindowNow()
+            && !item.optString("id").equals(countdownDismissedId);
+    if (!show) {
+      if (countdownShowing) {
+        countdownShowing = false;
+        countdownLayer.setVisibility(View.GONE);
+      }
+      return;
+    }
+    renderCountdown(state, item);
+    if (!countdownShowing) {
+      countdownShowing = true;
+      countdownLayer.setVisibility(View.VISIBLE);
+      countdownLayer.bringToFront();
+      if (ambient != null && ambient.isShowing()) ambient.hide();
+    }
+  }
+
+  private void renderCountdown(JSONObject state, JSONObject item) {
+    countdownShownId = item.optString("id");
+    countdownShownState = item.optString("state");
+    boolean paused = "paused".equals(countdownShownState);
+    long remaining = item.optLong("remaining_sec", 0), duration = item.optLong("duration_sec", 0);
+    countdownTimeView.setText(formatRemaining(remaining));
+    countdownTimeView.setTextSize(remaining >= 3600 ? 92 : 120);
+    countdownTimeView.setTextColor(paused ? 0xe0ffffff : 0xffffffff);
+    String label = item.optString("label", "");
+    countdownLabelView.setText(label);
+    countdownLabelView.setVisibility(label.isEmpty() ? View.GONE : View.VISIBLE);
+    countdownBadgeView.setVisibility(paused ? View.VISIBLE : View.GONE);
+    countdownRing.setProgress(duration > 0 ? (float) remaining / (float) duration : 0f, paused);
+    countdownToggleButton.setText(paused ? "继续" : "暂停");
+    countdownHintView.setText(paused ? "点按其他区域返回 · 保持暂停" : "点按其他区域返回 · 计时继续");
+    JSONObject next = state.optJSONObject("next");
+    int others = state.optInt("total", 1) - 1;
+    if (next != null && others > 0) {
+      String text = "另有 " + others + " 个倒计时";
+      String nextLabel = next.optString("label", "");
+      if (!nextLabel.isEmpty()) text += " · " + nextLabel;
+      text += " " + formatRemaining(next.optLong("remaining_sec", 0));
+      countdownMultiView.setText(text);
+      countdownMultiView.setVisibility(View.VISIBLE);
+    } else countdownMultiView.setVisibility(View.GONE);
+  }
+
+  /** Leave the countdown screen without touching the timer; it stays away
+   * until a different timer becomes the display entry. */
+  private void exitCountdownLayer() {
+    countdownDismissedId = countdownShownId;
+    countdownShowing = false;
+    if (countdownLayer != null) countdownLayer.setVisibility(View.GONE);
+  }
+
+  /** Remaining time as MM:SS, or H:MM:SS once it reaches an hour. */
+  static String formatRemaining(long totalSeconds) {
+    long s = Math.max(0, totalSeconds);
+    if (s >= 3600)
+      return String.format(
+          Locale.CHINA, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
+    return String.format(Locale.CHINA, "%02d:%02d", s / 60, s % 60);
   }
 
   @Override
@@ -1299,7 +1548,11 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     // A showing alarm layer holds the panel on even when the keep-screen
     // preference is off, so the full-screen alarm cannot go dark mid-ring.
     boolean keepAwake =
-        !black && (alarmShowing || prefs.getBoolean("keepScreen", true) || active);
+        !black
+            && (alarmShowing
+                || countdownShowing
+                || prefs.getBoolean("keepScreen", true)
+                || active);
     int flags = keepAwake ? p.flags | keepFlag : p.flags & ~keepFlag;
     // Reapplying unchanged window attributes every second can disturb system idle handling.
     if (p.screenBrightness != brightness || p.flags != flags) {

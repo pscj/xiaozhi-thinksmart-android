@@ -99,6 +99,40 @@ final class Mcp {
                     "enabled",
                     VoiceService.json("type", "boolean")),
                 new JSONArray().put("id").put("enabled")));
+        tools.put(
+            tool(
+                "self.timer.create",
+                "创建设备本地倒计时：duration_sec 为总秒数（1…86400，最长 24 小时），label 可选",
+                VoiceService.json(
+                    "duration_sec",
+                    VoiceService.json("type", "integer", "minimum", 1, "maximum", 86400),
+                    "label",
+                    VoiceService.json("type", "string")),
+                new JSONArray().put("duration_sec")));
+        tools.put(
+            tool(
+                "self.timer.list",
+                "列出全部倒计时（含调用时刻现算的剩余秒数）",
+                new JSONObject(),
+                new JSONArray()));
+        tools.put(
+            tool(
+                "self.timer.cancel",
+                "删除倒计时",
+                VoiceService.json("id", VoiceService.json("type", "string")),
+                new JSONArray().put("id")));
+        tools.put(
+            tool(
+                "self.timer.pause",
+                "暂停倒计时，返回冻结的剩余秒数",
+                VoiceService.json("id", VoiceService.json("type", "string")),
+                new JSONArray().put("id")));
+        tools.put(
+            tool(
+                "self.timer.resume",
+                "继续已暂停的倒计时",
+                VoiceService.json("id", VoiceService.json("type", "string")),
+                new JSONArray().put("id")));
         result = VoiceService.json("tools", tools);
       } else if (method.equals("tools/call")) {
         JSONObject p = request.getJSONObject("params"), a = p.optJSONObject("arguments");
@@ -187,6 +221,46 @@ final class Mcp {
                     true,
                     "next_fire",
                     item.isNull("next_fire") ? JSONObject.NULL : item.optString("next_fire"));
+          } else throw new IllegalArgumentException("未知工具");
+        } else if (name.startsWith("self.timer.")) {
+          Timers timers = service.timers();
+          long nowMs = System.currentTimeMillis();
+          if (name.endsWith(".create")) {
+            JSONObject item =
+                timers.create(
+                    a.getInt("duration_sec"), a.optString("label", ""), nowMs);
+            value =
+                VoiceService.json(
+                    "success",
+                    true,
+                    "id",
+                    item.optString("id"),
+                    "duration_sec",
+                    item.optInt("duration_sec"),
+                    "ends_at",
+                    item.optLong("ends_at"),
+                    "ends_at_local",
+                    Timers.localIso(item.optLong("ends_at")));
+          } else if (name.endsWith(".list"))
+            value = VoiceService.json("timers", timers.snapshot(nowMs));
+          else if (name.endsWith(".cancel")) {
+            timers.cancel(a.getString("id"));
+            value = VoiceService.json("success", true);
+          } else if (name.endsWith(".pause")) {
+            JSONObject item = timers.pause(a.getString("id"), nowMs);
+            value =
+                VoiceService.json(
+                    "success", true, "remaining_sec", item.optLong("remaining_sec"));
+          } else if (name.endsWith(".resume")) {
+            JSONObject item = timers.resume(a.getString("id"), nowMs);
+            value =
+                VoiceService.json(
+                    "success",
+                    true,
+                    "ends_at",
+                    item.optLong("ends_at"),
+                    "ends_at_local",
+                    Timers.localIso(item.optLong("ends_at")));
           } else throw new IllegalArgumentException("未知工具");
         } else throw new IllegalArgumentException("未知工具 " + name);
         result =
