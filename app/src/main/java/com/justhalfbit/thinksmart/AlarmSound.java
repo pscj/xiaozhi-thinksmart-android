@@ -4,6 +4,7 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.util.Log;
 
 /**
  * Locally synthesized alarm chime: a three-note sine bell sequence baked into
@@ -46,6 +47,7 @@ final class AlarmSound {
       created.play();
       track = created;
     } catch (Exception e) {
+      Log.e("AlarmSound", "闹钟铃声启动失败", e);
       if (created != null) created.release();
     }
   }
