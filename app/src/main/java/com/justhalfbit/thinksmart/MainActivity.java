@@ -68,8 +68,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private Button countdownToggleButton, countdownCancelButton;
   private boolean countdownShowing;
   private String countdownShownId = "", countdownDismissedId = "", countdownShownState = "";
-  /** Timer ids whose countdown screen has appeared at least once (see CountdownGate). */
-  private final Set<String> countdownSeenIds = new HashSet<>();
+  /** Per-item turn-gate exemption for the countdown screen (see CountdownExemption). */
+  private final CountdownExemption countdownExemption = new CountdownExemption();
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
@@ -1013,21 +1013,23 @@ public class MainActivity extends Activity implements VoiceService.Listener {
    * layer and a tap dismissal, and to a conversation turn in flight — but
    * the gate is the turn, not the session (CountdownGate): a session sits
    * open in the listening state between turns, and the screen belongs up
-   * then. An item's first appearance is exempt from the turn gate, so a
-   * timer created by voice shows while its own confirmation reply is
-   * still playing. The timer itself keeps running in the service
-   * regardless of what the screen does.
+   * then. An item's first appearance is exempt from the turn gate for
+   * the whole turn that creates it (CountdownExemption), so a timer
+   * created by voice shows while its own confirmation reply is still
+   * playing — and stays up until that turn ends. The timer itself keeps
+   * running in the service regardless of what the screen does.
    */
   private void updateCountdown() {
     if (countdownLayer == null) return;
     JSONObject state = service == null ? null : service.timerDisplayState();
     JSONObject item = state == null ? null : state.optJSONObject("item");
     String itemId = item == null ? "" : item.optString("id");
+    boolean turnInFlight = service != null && service.turnInFlight();
     boolean show =
         CountdownGate.shouldShow(
             item != null,
-            service != null && service.turnInFlight(),
-            item != null && !countdownSeenIds.contains(itemId),
+            turnInFlight,
+            countdownExemption.exempt(itemId, turnInFlight),
             overlayOpen,
             black,
             alarmShowing,
@@ -1040,7 +1042,6 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       }
       return;
     }
-    countdownSeenIds.add(itemId);
     renderCountdown(state, item);
     if (!countdownShowing) {
       countdownShowing = true;
