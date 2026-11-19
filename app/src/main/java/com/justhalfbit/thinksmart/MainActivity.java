@@ -77,6 +77,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
+  /** Latest conversation pending indicator; recreated with its row, held under cover layers. */
+  private PendingIndicator pendingIndicator;
   private BackdropView backdrop;
   private AmbientView ambient;
   private EditText input;
@@ -99,6 +101,16 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           bound = false;
           service = null;
           showText(status, "服务已停止");
+        }
+      };
+  /** True while a countdown render is queued at the front of the queue. */
+  private boolean countdownRenderQueued;
+
+  private final Runnable countdownRender =
+      new Runnable() {
+        public void run() {
+          countdownRenderQueued = false;
+          if (visible) updateCountdown();
         }
       };
   private final Runnable tick =
@@ -126,7 +138,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
                   || (ambientUp && !sleeping))) {
             setBlack(true);
           }
-          updateCountdown();
+          postCountdownRender();
           updateAmbient(now);
           ui.postDelayed(this, nextTickDelayMs());
         }
@@ -158,6 +170,41 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       }
     }
     return tickPacer.nextDelayMs(SystemClock.elapsedRealtime());
+  }
+
+  /**
+   * Queue the per-tick countdown upkeep at the front of the message queue
+   * instead of running it inline: it then executes as soon as the tick
+   * returns, ahead of whatever ordinary messages are already queued, so a
+   * backlog cannot push the flip-aligned render seconds late. The queued
+   * flag keeps a stalled queue from stacking duplicate renders — when the
+   * queue finally drains, the single queued render draws the current
+   * value. Scheduling is unchanged: the tick still runs on TickPacer's
+   * phase and computes the next delay from the previous render's ends_at
+   * (an entry's ends_at does not move while it runs, so the phase holds).
+   */
+  private void postCountdownRender() {
+    if (countdownRenderQueued) return;
+    countdownRenderQueued = true;
+    ui.postAtFrontOfQueue(countdownRender);
+  }
+
+  /**
+   * While an opaque full-screen layer (countdown screen, ringing screen)
+   * covers the conversation UI, hold the continuous animations underneath
+   * it: the orb's and the pending indicator's self-driven redraws are
+   * invisible under the cover, and their frame load on the main thread is
+   * what starves the covering layer's own per-second renders in the first
+   * seconds after a voice-created timer appears, while its conversation
+   * is still wrapping up underneath. Called wherever either layer's
+   * visibility flips; releasing the hold only invalidates — an animation
+   * that should stay stopped (orb hidden by the black curtain, indicator
+   * row gone) does not re-arm, because its loop re-arms only when shown.
+   */
+  private void applyCoverAnimationHold() {
+    boolean covered = countdownShowing || alarmShowing;
+    if (orb != null) orb.setAnimationHeld(covered);
+    if (pendingIndicator != null) pendingIndicator.setAnimationHeld(covered);
   }
 
   private void reconcileSleepBlackout() {
@@ -856,11 +903,13 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     alarmLayer.setVisibility(View.VISIBLE);
     alarmLayer.bringToFront();
     alarmShowing = true;
+    applyCoverAnimationHold();
   }
 
   private void hideAlarmLayer() {
     alarmShowing = false;
     if (alarmLayer != null) alarmLayer.setVisibility(View.GONE);
+    applyCoverAnimationHold();
   }
 
   private void dismissAlarm() {
@@ -1065,6 +1114,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
         countdownShowing = false;
         countdownLayer.setVisibility(View.GONE);
       }
+      applyCoverAnimationHold();
       return;
     }
     renderCountdown(state, item);
@@ -1078,6 +1128,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       countdownLayer.bringToFront();
       if (ambient != null && ambient.isShowing()) ambient.hide();
     }
+    applyCoverAnimationHold();
   }
 
   private void renderCountdown(JSONObject state, JSONObject item) {
@@ -1113,6 +1164,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     countdownDismissedId = countdownShownId;
     countdownShowing = false;
     if (countdownLayer != null) countdownLayer.setVisibility(View.GONE);
+    applyCoverAnimationHold();
   }
 
   /** Remaining time as MM:SS, or H:MM:SS once it reaches an hour. */
@@ -1493,10 +1545,12 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           logoParams.rightMargin = dp(10);
           pending.addView(pendingLogo, logoParams);
         }
-        pending.addView(
+        pendingIndicator =
             new PendingIndicator(
-                this, thinking, playing -> service == null ? 0 : service.audioLevel(playing)),
-            new LinearLayout.LayoutParams(thinking ? dp(40) : dp(32), dp(28)));
+                this, thinking, playing -> service == null ? 0 : service.audioLevel(playing));
+        pending.addView(
+            pendingIndicator, new LinearLayout.LayoutParams(thinking ? dp(40) : dp(32), dp(28)));
+        applyCoverAnimationHold();
         TextView pendingLabel =
             label(
                 thinking

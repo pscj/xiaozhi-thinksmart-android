@@ -11,11 +11,23 @@ final class PendingIndicator extends View {
   private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
   private final boolean thinking;
   private final OrbView.LevelSource levels;
+  private boolean animationHeld;
 
   PendingIndicator(Context context, boolean thinking, OrbView.LevelSource levels) {
     super(context);
     this.thinking = thinking;
     this.levels = levels;
+  }
+
+  /**
+   * Same hold as the orb's: while an opaque full-screen layer covers the
+   * conversation UI this indicator is invisible, so its self-driven redraw
+   * stops; releasing the hold restarts it when shown.
+   */
+  void setAnimationHeld(boolean held) {
+    if (animationHeld == held) return;
+    animationHeld = held;
+    if (!held) invalidate();
   }
 
   @Override
@@ -44,6 +56,6 @@ final class PendingIndicator extends View {
         canvas.drawLine(x, getHeight() / 2f - h / 2, x, getHeight() / 2f + h / 2, paint);
       }
     }
-    if (isShown() && getWindowVisibility() == VISIBLE) postInvalidateDelayed(50);
+    if (!animationHeld && isShown() && getWindowVisibility() == VISIBLE) postInvalidateDelayed(50);
   }
 }

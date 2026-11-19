@@ -10,6 +10,7 @@ final class OrbView extends View {
   private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
   private String state = "待机";
   private boolean muted;
+  private boolean animationHeld;
   private long stateChanged = SystemClock.uptimeMillis();
 
   interface LevelSource {
@@ -62,6 +63,19 @@ final class OrbView extends View {
     this.state = value;
     this.muted = muted;
     invalidate();
+  }
+
+  /**
+   * Held while an opaque full-screen layer (countdown, ringing) covers the
+   * conversation UI: the orb is invisible then, so its self-driven redraw
+   * stops instead of competing for the main thread. Releasing the hold
+   * restarts the loop when the orb is on screen; a frame already queued
+   * when the hold lands draws once more and does not re-arm.
+   */
+  void setAnimationHeld(boolean held) {
+    if (animationHeld == held) return;
+    animationHeld = held;
+    if (!held) invalidate();
   }
 
   @Override
@@ -171,7 +185,7 @@ final class OrbView extends View {
     canvas.drawOval(32, 15, 54, 27, paint);
     canvas.restore();
     canvas.restore();
-    if (isShown() && getWindowVisibility() == VISIBLE)
+    if (!animationHeld && isShown() && getWindowVisibility() == VISIBLE)
       postInvalidateDelayed(state.equals("待机") ? 100 : 33);
   }
 
