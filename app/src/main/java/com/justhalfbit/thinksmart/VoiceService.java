@@ -137,6 +137,8 @@ public class VoiceService extends Service {
       pttHeld;
   private long listenStarted, lastExtended;
   private long turn, abortUntil;
+  /** Last audio frame at speech level while listening; written by the audio thread. */
+  private volatile long lastSpeechAt;
   private String session = "", pendingText = "", state = "待机", error = "";
   /** Text of the reply sentence currently being played; drives the stop-word echo guard. */
   private String playingSentence = "";
@@ -301,6 +303,7 @@ public class VoiceService extends Service {
       if (wakeBacklog.size() == 150) wakeBacklog.removeFirst();
       wakeBacklog.addLast(frame);
     }
+    if (speech && state.equals("聆听中")) lastSpeechAt = SystemClock.elapsedRealtime();
     if (speech && uploading && !manual && state.equals("聆听中")) {
       long now = SystemClock.elapsedRealtime();
       if (now - lastExtended > 250) {
@@ -484,6 +487,21 @@ public class VoiceService extends Service {
    * next: the runner-up entry when several timers coexist}. Null when no
    * timer is running or paused.
    */
+  /**
+   * Whether a conversation turn is in flight, for UI gating (the countdown
+   * screen yields to it). A captured utterance being recognized, thought
+   * over or spoken back counts (Protocol.turnInFlight). So does speech-level
+   * energy heard in the listening state within the last half second: the hub
+   * sends no speech-start event (its vad messages are end/empty only), so
+   * the local frame energy — the same flag that extends the listen timeout —
+   * is the only start-of-speech signal. A session merely sitting open
+   * (listening, silent) is not a turn in flight.
+   */
+  public boolean turnInFlight() {
+    if (Protocol.turnInFlight(state)) return true;
+    return state.equals("聆听中") && SystemClock.elapsedRealtime() - lastSpeechAt < 500;
+  }
+
   public JSONObject timerDisplayState() {
     if (timers == null) return null;
     long nowMs = System.currentTimeMillis();

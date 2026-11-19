@@ -68,7 +68,9 @@ final class Mcp {
             tool(
                 "self.alarm.create",
                 "创建设备本地闹钟：time 为 HH:MM；repeat 可选 once/daily/weekdays/weekly/monthly"
-                    + "（默认 once），weekly 必须给 weekdays（1=周一…7=周日），monthly 必须给 month_day",
+                    + "（默认 once），weekly 必须给 weekdays（1=周一…7=周日），monthly 必须给 month_day。"
+                    + "创建新闹钟直接调用本工具，不要先调用 self.alarm.list；"
+                    + "list 只用于用户询问现有闹钟时",
                 VoiceService.json(
                     "time",
                     VoiceService.json("type", "string"),
@@ -102,7 +104,9 @@ final class Mcp {
         tools.put(
             tool(
                 "self.timer.create",
-                "创建设备本地倒计时：duration_sec 为总秒数（1…86400，最长 24 小时），label 可选",
+                "创建设备本地倒计时：duration_sec 为总秒数（1…86400，最长 24 小时），label 可选。"
+                    + "创建新倒计时直接调用本工具，不要先调用 self.timer.list；"
+                    + "list 只用于用户询问现有倒计时时",
                 VoiceService.json(
                     "duration_sec",
                     VoiceService.json("type", "integer", "minimum", 1, "maximum", 86400),

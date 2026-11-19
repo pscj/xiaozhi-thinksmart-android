@@ -95,4 +95,25 @@ public class ProtocolTest {
     }
   }
 
+  @Test
+  public void turnInFlightCoversCapturedUtteranceStates() {
+    assertTrue(Protocol.turnInFlight("识别中"));
+    assertTrue(Protocol.turnInFlight("思考中"));
+    assertTrue(Protocol.turnInFlight("回复中"));
+  }
+
+  @Test
+  public void turnInFlightExcludesOpenSessionAndIdleStates() {
+    // Listening means the session is open, not that a turn is in flight:
+    // conversationActive covers it, turnInFlight must not.
+    assertTrue(Protocol.conversationActive("聆听中"));
+    assertFalse(Protocol.turnInFlight("聆听中"));
+    assertFalse(Protocol.turnInFlight("待机"));
+    assertFalse(Protocol.turnInFlight("连接中"));
+    assertFalse(Protocol.turnInFlight("未连接"));
+    assertFalse(Protocol.turnInFlight("服务已停止"));
+    assertFalse(Protocol.turnInFlight(""));
+    assertFalse(Protocol.turnInFlight(null));
+  }
+
 }

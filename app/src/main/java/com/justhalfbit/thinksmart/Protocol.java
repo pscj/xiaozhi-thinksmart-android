@@ -40,5 +40,15 @@ public final class Protocol {
         || "回复中".equals(state);
   }
 
+  /**
+   * A turn is in flight once an utterance has been captured and is being
+   * recognized, thought over or spoken back. Finer than conversationActive:
+   * "聆听中" only means a session is open (the microphone is up and the
+   * listen window has not expired), with no turn in flight between turns.
+   */
+  public static boolean turnInFlight(String state) {
+    return "识别中".equals(state) || "思考中".equals(state) || "回复中".equals(state);
+  }
+
   private Protocol() {}
 }

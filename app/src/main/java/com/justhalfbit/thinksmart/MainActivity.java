@@ -68,6 +68,8 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private Button countdownToggleButton, countdownCancelButton;
   private boolean countdownShowing;
   private String countdownShownId = "", countdownDismissedId = "", countdownShownState = "";
+  /** Timer ids whose countdown screen has appeared at least once (see CountdownGate). */
+  private final Set<String> countdownSeenIds = new HashSet<>();
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
@@ -1006,23 +1008,31 @@ public class MainActivity extends Activity implements VoiceService.Listener {
 
   /**
    * Per-second countdown-screen upkeep, from the tick. The screen takes
-   * the standby screen's place while a timer runs or is paused, but it
-   * yields to everything else: an active conversation, an overlay, the
-   * black curtain (sleep window included) and the ringing layer all hide
-   * it, and the timer itself keeps running in the service regardless.
+   * the standby screen's place while a timer runs or is paused. It yields
+   * to an overlay, the black curtain (sleep window included), the ringing
+   * layer and a tap dismissal, and to a conversation turn in flight — but
+   * the gate is the turn, not the session (CountdownGate): a session sits
+   * open in the listening state between turns, and the screen belongs up
+   * then. An item's first appearance is exempt from the turn gate, so a
+   * timer created by voice shows while its own confirmation reply is
+   * still playing. The timer itself keeps running in the service
+   * regardless of what the screen does.
    */
   private void updateCountdown() {
     if (countdownLayer == null) return;
     JSONObject state = service == null ? null : service.timerDisplayState();
     JSONObject item = state == null ? null : state.optJSONObject("item");
+    String itemId = item == null ? "" : item.optString("id");
     boolean show =
-        item != null
-            && !active
-            && !overlayOpen
-            && !black
-            && !alarmShowing
-            && !inSleepWindowNow()
-            && !item.optString("id").equals(countdownDismissedId);
+        CountdownGate.shouldShow(
+            item != null,
+            service != null && service.turnInFlight(),
+            item != null && !countdownSeenIds.contains(itemId),
+            overlayOpen,
+            black,
+            alarmShowing,
+            inSleepWindowNow(),
+            item != null && itemId.equals(countdownDismissedId));
     if (!show) {
       if (countdownShowing) {
         countdownShowing = false;
@@ -1030,6 +1040,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       }
       return;
     }
+    countdownSeenIds.add(itemId);
     renderCountdown(state, item);
     if (!countdownShowing) {
       countdownShowing = true;
