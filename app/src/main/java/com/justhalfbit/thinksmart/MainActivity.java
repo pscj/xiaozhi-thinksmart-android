@@ -70,6 +70,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
   private String countdownShownId = "", countdownDismissedId = "", countdownShownState = "";
   /** Per-item turn-gate exemption for the countdown screen (see CountdownExemption). */
   private final CountdownExemption countdownExemption = new CountdownExemption();
+  /** Cadence for the per-second tick (see TickPacer). */
+  private final TickPacer tickPacer = new TickPacer();
+  /** ends_at (wall clock) of the running countdown entry on screen; 0 when none. */
+  private long countdownEndsAtMs;
   private View volumeHud;
   private Runnable hideVolumeHud;
   private OrbView orb;
@@ -124,7 +128,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           }
           updateCountdown();
           updateAmbient(now);
-          ui.postDelayed(this, 1000);
+          ui.postDelayed(this, nextTickDelayMs());
         }
       };
   private final Runnable blackRecheck =
@@ -135,6 +139,26 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           if (black) ui.postDelayed(this, BLACK_RECHECK_MS);
         }
       };
+
+  /**
+   * Delay until the next tick. While the countdown screen shows a
+   * running timer, the tick phase-aligns to that timer's ends_at so the
+   * render lands just after each second flip (TickPacer.flipDelayMs);
+   * otherwise the pacer's planned phase absorbs each run's work and
+   * scheduling slop instead of accumulating them as drift.
+   */
+  private long nextTickDelayMs() {
+    if (countdownShowing && countdownEndsAtMs > 0) {
+      long flip = TickPacer.flipDelayMs(System.currentTimeMillis(), countdownEndsAtMs);
+      if (flip >= 0) {
+        // Flip alignment owns the cadence while it lasts; restart the
+        // generic phase afterwards rather than catching up to it.
+        tickPacer.reset();
+        return flip;
+      }
+    }
+    return tickPacer.nextDelayMs(SystemClock.elapsedRealtime());
+  }
 
   private void reconcileSleepBlackout() {
     if (!black) return;
@@ -1036,6 +1060,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
             inSleepWindowNow(),
             item != null && itemId.equals(countdownDismissedId));
     if (!show) {
+      countdownEndsAtMs = 0;
       if (countdownShowing) {
         countdownShowing = false;
         countdownLayer.setVisibility(View.GONE);
@@ -1043,6 +1068,10 @@ public class MainActivity extends Activity implements VoiceService.Listener {
       return;
     }
     renderCountdown(state, item);
+    // Feed the tick's phase: while a running entry is on screen, renders
+    // align to its ends_at so each displayed second gets a full beat.
+    countdownEndsAtMs =
+        Timers.STATE_RUNNING.equals(item.optString("state")) ? item.optLong("ends_at", 0) : 0;
     if (!countdownShowing) {
       countdownShowing = true;
       countdownLayer.setVisibility(View.VISIBLE);
