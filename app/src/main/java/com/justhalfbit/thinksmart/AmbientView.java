@@ -8,7 +8,10 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.media.ExifInterface;
 import android.os.Handler;
 import android.os.Looper;
@@ -61,11 +64,12 @@ import okhttp3.Call;
  * One next image is prefetched while the current image stays visible for at least five minutes.
  * A late or failed request never clears the current image. The last displayed image is cached.
  *
- * <p>The info screen sits on a background photo under a dark scrim (the web prototype's info
- * screen had one too): the {@code photos/} pictures when the folder holds any, slowly
- * rotating, otherwise the bundled defaults in {@code assets/ambient_bg} — the same four
- * scenic photos the web prototype used, rotating the same way. These information-screen
- * sources are independent of the remote photo frame.
+ * <p>The info screen's ground is a solid cream (the light theme): the background layer
+ * still rotates the {@code photos/} pictures when the folder holds any, otherwise the
+ * bundled defaults in {@code assets/ambient_bg} — the same four scenic photos the web
+ * prototype used — but an opaque cream scrim covers them, so the photos never show
+ * through on the info screen. These information-screen sources are independent of the
+ * remote photo frame.
  */
 final class AmbientView extends FrameLayout {
 
@@ -176,7 +180,7 @@ final class AmbientView extends FrameLayout {
     setBackgroundColor(0xff050813);
     setVisibility(GONE);
 
-    // ---- background layer: photo at the very bottom, dark scrim over it ----
+    // ---- background layer: photo at the very bottom, the opaque cream ground over it ----
     bgLayer = new FrameLayout(context);
     addView(bgLayer, new FrameLayout.LayoutParams(-1, -1));
     bgA = photoImage(context);
@@ -221,10 +225,10 @@ final class AmbientView extends FrameLayout {
     leftCol = new LinearLayout(context);
     leftCol.setOrientation(LinearLayout.VERTICAL);
     top.addView(leftCol, new LinearLayout.LayoutParams(0, -2, 1.2f));
-    timeText = text("", 96, 0xfff2f5ff);
+    timeText = text("", 96, 0xff40342a);
     timeText.setTypeface(null, Typeface.BOLD);
     leftCol.addView(timeText);
-    dateText = text("", 24, 0xffb6c0e2);
+    dateText = text("", 24, 0xff7a6a58);
     LinearLayout.LayoutParams dateParams = new LinearLayout.LayoutParams(-2, -2);
     dateParams.topMargin = dp(6);
     leftCol.addView(dateText, dateParams);
@@ -233,12 +237,12 @@ final class AmbientView extends FrameLayout {
     right.setOrientation(LinearLayout.VERTICAL);
     right.setGravity(Gravity.END);
     top.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
-    wxCity = text("", 20, 0xffb6c0e2);
+    wxCity = text("", 20, 0xff7a6a58);
     wxCity.setGravity(Gravity.END);
     right.addView(wxCity);
     // Graceful-degradation line: shown only when no reading is available at all, in
     // place of the whole weather cluster, so the corner never shows a half-empty layout.
-    wxFallback = text("天气暂不可用", 24, 0xfff2f5ff);
+    wxFallback = text("天气暂不可用", 24, 0xff40342a);
     wxFallback.setGravity(Gravity.END);
     wxFallback.setVisibility(GONE);
     LinearLayout.LayoutParams fallbackParams = new LinearLayout.LayoutParams(-1, -2);
@@ -276,7 +280,7 @@ final class AmbientView extends FrameLayout {
     wxCluster.addView(wxTempGlyph, tempGlyphParams);
 
     wxDivider = new View(context);
-    wxDivider.setBackgroundColor(0x59ffffff);
+    wxDivider.setBackgroundColor(0xffeadfc8);
     LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(dp(1), dp(80));
     dividerParams.leftMargin = dp(14);
     dividerParams.rightMargin = dp(14);
@@ -296,9 +300,9 @@ final class AmbientView extends FrameLayout {
     for (int i = 0; i < fcCards.length; i++) {
       FrameLayout card = new FrameLayout(context);
       GradientDrawable cardBg = new GradientDrawable();
-      cardBg.setColor(0x2b141d33);
+      cardBg.setColor(0xfffffdf8);
       cardBg.setCornerRadius(dp(14));
-      cardBg.setStroke(dp(1), 0x40ffffff);
+      cardBg.setStroke(dp(1), 0xffebdfc6);
       card.setBackground(cardBg);
       LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, -1, 1);
       if (i > 0) cardParams.leftMargin = dp(16);
@@ -317,11 +321,11 @@ final class AmbientView extends FrameLayout {
       linesParams.leftMargin = dp(10);
       group.addView(lines, linesParams);
       fcLines[i] = lines;
-      fcLine1[i] = text("", 19, 0xfff2f5ff);
+      fcLine1[i] = text("", 19, 0xff40342a);
       fcLine1[i].setTypeface(null, Typeface.BOLD);
       fcLine1[i].setSingleLine(true);
       lines.addView(fcLine1[i]);
-      fcLine2[i] = text("", 19, 0xffb6c0e2);
+      fcLine2[i] = text("", 19, 0xff7a6a58);
       fcLine2[i].setSingleLine(true);
       LinearLayout.LayoutParams line2Params = new LinearLayout.LayoutParams(-2, -2);
       line2Params.topMargin = dp(3);
@@ -347,15 +351,15 @@ final class AmbientView extends FrameLayout {
     LinearLayout.LayoutParams headParams = new LinearLayout.LayoutParams(-1, -2);
     headParams.topMargin = dp(12);
     newsCol.addView(newsHead, headParams);
-    TextView newsTitle = text("今日 AI 新闻", 21, 0xfff2f5ff);
+    TextView newsTitle = text("今日 AI 新闻", 21, 0xff40342a);
     newsTitle.setTypeface(null, Typeface.BOLD);
     newsHead.addView(newsTitle);
-    newsTag = text("示例 · 数据源待接入", 13, 0xffffd68a);
+    newsTag = text("示例 · 数据源待接入", 13, 0xff7a5a34);
     newsTag.setPadding(dp(10), dp(3), dp(10), dp(3));
     GradientDrawable tagBg = new GradientDrawable();
-    tagBg.setColor(0x22ffb547);
+    tagBg.setColor(0xfff0e4ce);
     tagBg.setCornerRadius(dp(12));
-    tagBg.setStroke(dp(1), 0x55ffb547);
+    tagBg.setStroke(dp(1), 0xffebdfc6);
     newsTag.setBackground(tagBg);
     LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(-2, -2);
     tagParams.leftMargin = dp(12);
@@ -383,9 +387,9 @@ final class AmbientView extends FrameLayout {
     dressPanel = new LinearLayout(context);
     dressPanel.setOrientation(LinearLayout.VERTICAL);
     GradientDrawable dressBg = new GradientDrawable();
-    dressBg.setColor(0x2b141d33);
+    dressBg.setColor(0xfffffdf8);
     dressBg.setCornerRadius(dp(14));
-    dressBg.setStroke(dp(1), 0x40ffffff);
+    dressBg.setStroke(dp(1), 0xffebdfc6);
     dressPanel.setBackground(dressBg);
     dressPanel.setPadding(dp(DRESS_PAD_H_DP), dp(10), dp(DRESS_PAD_H_DP), dp(10));
     LinearLayout.LayoutParams dressParams = new LinearLayout.LayoutParams(dp(DRESS_W_DP), -2);
@@ -394,7 +398,7 @@ final class AmbientView extends FrameLayout {
     // level with where the news column ends, instead of hanging from the region's top.
     dressParams.gravity = Gravity.BOTTOM;
     newsArea.addView(dressPanel, dressParams);
-    TextView dressTitle = text(DRESS_TITLE, 20, 0xfff2f5ff);
+    TextView dressTitle = text(DRESS_TITLE, 20, 0xff40342a);
     dressTitle.setTypeface(null, Typeface.BOLD);
     dressTitle.setGravity(Gravity.CENTER_VERTICAL);
     dressPanel.addView(dressTitle, new LinearLayout.LayoutParams(-1, dp(DRESS_TITLE_H_DP)));
@@ -409,12 +413,20 @@ final class AmbientView extends FrameLayout {
     wakeBar = new LinearLayout(context);
     wakeBar.setOrientation(LinearLayout.HORIZONTAL);
     wakeBar.setGravity(Gravity.CENTER);
-    wakeBar.setBackgroundColor(WAKE_BAR_BG);
+    // The bar's own ground, with the divider colour showing through as a 1 dp top
+    // edge: a plain colour background cannot draw just one edge, so the fill layer is
+    // inset from the top of a full-size divider-coloured layer.
+    GradientDrawable wakeFill = new GradientDrawable();
+    wakeFill.setColor(WAKE_BAR_BG);
+    LayerDrawable wakeBg =
+        new LayerDrawable(new Drawable[] {new ColorDrawable(WAKE_BAR_EDGE), wakeFill});
+    wakeBg.setLayerInset(1, 0, dp(1), 0, 0);
+    wakeBar.setBackground(wakeBg);
     wakeBar.setVisibility(GONE);
     addView(
         wakeBar,
         new FrameLayout.LayoutParams(-1, dp(WAKE_BAR_H), Gravity.BOTTOM));
-    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xffb6c0e2);
+    wakeText = text("喊「小麦小麦」随时唤醒我", 17, 0xff7a6a58);
     wakeBar.addView(wakeText, new LinearLayout.LayoutParams(-2, -2));
 
     // ---- photo layer ----
@@ -526,14 +538,14 @@ final class AmbientView extends FrameLayout {
     String phrase = wakePhrase == null ? null : wakePhrase.get();
     if (phrase == null || phrase.trim().isEmpty()) phrase = "小麦小麦";
     phrase = phrase.trim();
-    // Only the wake phrase itself stands out (amber and bold); the rest of the hint keeps
+    // Only the wake phrase itself stands out (terracotta and bold); the rest of the hint keeps
     // the bar's plain colour and weight.
     String full = "喊「" + phrase + "」随时唤醒我";
     SpannableString span = new SpannableString(full);
     int start = full.indexOf(phrase);
     int end = start + phrase.length();
     span.setSpan(
-        new ForegroundColorSpan(0xffffd68a), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        new ForegroundColorSpan(0xffb45a1b), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     span.setSpan(new StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     wakeText.setText(span);
   }
@@ -827,7 +839,7 @@ final class AmbientView extends FrameLayout {
     String condition = wx.condition == null ? "" : wx.condition;
     wxIcon.setKind(AmbientData.classifyIcon(condition));
     float condSizePx = sp(WX_COND_SP);
-    wxCondGlyph.setGlyphText(condition, condSizePx, 0xfff2f5ff);
+    wxCondGlyph.setGlyphText(condition, condSizePx, 0xff40342a);
     // The temperature's glyph height equals the icon column's full height — icon + gap +
     // the condition glyph's own height — with every part measured, never estimated: the
     // temperature's font size is scaled from a probe measurement to hit that target, so
@@ -840,7 +852,7 @@ final class AmbientView extends FrameLayout {
       String tempText = wx.currentTemp + "°";
       float probePx = glyphHeightPx(tempText, 100f, true);
       float sizePx = probePx > 0 ? 100f * targetPx / probePx : 100f;
-      wxTempGlyph.setGlyphText(tempText, sizePx, 0xfff2f5ff);
+      wxTempGlyph.setGlyphText(tempText, sizePx, 0xff40342a);
       wxTempGlyph.setVisibility(VISIBLE);
     } else {
       // No live temperature: no empty number — the rest of the cluster keeps its shape.
@@ -878,9 +890,9 @@ final class AmbientView extends FrameLayout {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         wxDetails.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
-        TextView name = text(detail.name, 19, 0xffb6c0e2);
+        TextView name = text(detail.name, 19, 0xff7a6a58);
         row.addView(name, new LinearLayout.LayoutParams(dp(WX_DETAIL_NAME_W_DP), -2));
-        TextView value = text(detail.value, 19, 0xfff2f5ff);
+        TextView value = text(detail.value, 19, 0xff40342a);
         value.setTypeface(null, Typeface.BOLD);
         value.setGravity(Gravity.END);
         LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(valueWPx, -2);
@@ -990,10 +1002,10 @@ final class AmbientView extends FrameLayout {
         GradientDrawable dotBg = new GradientDrawable();
         dotBg.setShape(GradientDrawable.OVAL);
         dotBg.setColor(swatch.color);
-        dotBg.setStroke(dp(1), 0x66ffffff);
+        dotBg.setStroke(dp(1), 0x3340342a);
         dot.setBackground(dotBg);
         slot.addView(dot, new LinearLayout.LayoutParams(dp(13), dp(13)));
-        TextView name = text(swatch.name, 16, 0xfff2f5ff);
+        TextView name = text(swatch.name, 16, 0xff7a6a58);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(-2, -2);
         nameParams.leftMargin = dp(5);
         slot.addView(name, nameParams);
@@ -1001,11 +1013,9 @@ final class AmbientView extends FrameLayout {
     }
   }
 
-  /** Tier-name styling from the mock: 大吉 amber bold, 忌用 soft red, the rest plain. */
+  /** Tier names all take the ink colour on the light ground; 大吉 keeps its bold, set at the call site. */
   private static int tierColor(int tierIndex) {
-    if (tierIndex == 0) return 0xffffd68a;
-    if (tierIndex == WuxingDress.TIER_NAMES.length - 1) return 0xfff28b8b;
-    return 0xfff2f5ff;
+    return 0xff40342a;
   }
 
   /** sp → px, matching TextView's own conversion, for glyph measurements. */
@@ -1183,12 +1193,12 @@ final class AmbientView extends FrameLayout {
       rowParams.topMargin = dp(NEWS_ROW_GAP_DP);
       newsList.addView(row, rowParams);
 
-      TextView chip = text(item.category, 14, 0xff9edaff);
+      TextView chip = text(item.category, 14, 0xff7a5a34);
       chip.setPadding(dp(10), dp(3), dp(10), dp(3));
       GradientDrawable chipBg = new GradientDrawable();
-      chipBg.setColor(0x149edaff);
+      chipBg.setColor(0xfff0e4ce);
       chipBg.setCornerRadius(dp(10));
-      chipBg.setStroke(dp(1), 0x339edaff);
+      chipBg.setStroke(dp(1), 0xffebdfc6);
       chip.setBackground(chipBg);
       row.addView(chip, new LinearLayout.LayoutParams(-2, -2));
 
@@ -1199,12 +1209,12 @@ final class AmbientView extends FrameLayout {
       row.addView(texts, textsParams);
       // Titles live in the narrowed news column now: one line, end-ellipsis — the right
       // edge stops at the dressing panel instead of running the full screen width.
-      TextView title = text(item.title, 20, 0xfff2f5ff);
+      TextView title = text(item.title, 20, 0xff40342a);
       title.setMaxLines(1);
       title.setEllipsize(TextUtils.TruncateAt.END);
       texts.addView(title, new LinearLayout.LayoutParams(-1, -2));
       if (!item.summary.isEmpty()) {
-        TextView summary = text(item.summary, 15, 0xffb6c0e2);
+        TextView summary = text(item.summary, 15, 0xff7a6a58);
         summary.setMaxLines(2);
         texts.addView(summary, new LinearLayout.LayoutParams(-1, -2));
       }
@@ -1440,8 +1450,11 @@ final class AmbientView extends FrameLayout {
   /** Clearance kept above the lifted clock block (dp); covers the burn-in upward steps. */
   private static final int CLOCK_HEADROOM_DP = 6;
 
-  /** Near-opaque version of the screen's base colour: the strip reads as its own bar. */
-  private static final int WAKE_BAR_BG = 0xe6050813;
+  /** The card white: against the cream ground the strip reads as its own bar. */
+  private static final int WAKE_BAR_BG = 0xfffffdf8;
+
+  /** Divider colour along the wake bar's top edge. */
+  private static final int WAKE_BAR_EDGE = 0xffeadfc8;
 
   // Weather cluster + forecast strip geometry (the approved ref11 composition).
   private static final int WX_ICON_DP = 60;
@@ -1507,8 +1520,13 @@ final class AmbientView extends FrameLayout {
   /** Bundled fallback backgrounds (the web prototype's four scenic photos) under assets/. */
   private static final String BG_ASSET_DIR = "ambient_bg";
 
-  /** ~60% black over the background photo, so clock/weather/news text stays readable. */
-  private static final int SCRIM_COLOR = 0x99000000;
+  /**
+   * The info screen's solid cream ground (the light theme): fully opaque over the
+   * background photo, which keeps rotating unseen beneath it. The scrim — not the
+   * shifting info layer — carries the colour, so the burn-in nudge never opens a
+   * dark sliver at the panel's edge.
+   */
+  private static final int SCRIM_COLOR = 0xfffaf2e3;
   private static final List<String> PHOTO_EXTS =
       Arrays.asList("jpg", "jpeg", "png", "webp");
 

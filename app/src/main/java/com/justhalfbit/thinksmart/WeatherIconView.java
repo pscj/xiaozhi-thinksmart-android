@@ -15,11 +15,14 @@ import android.view.View;
  */
 final class WeatherIconView extends View {
 
+  // Palette for the info screen's light cream ground: the sun keeps its warm yellow,
+  // but the cloud, snow and fog — near-white on the old dark ground — darken into
+  // blue-greys that stay visible on cream.
   private static final int SUN_COLOR = 0xffffd76a;
-  private static final int CLOUD_COLOR = 0xffe9eef8;
+  private static final int CLOUD_COLOR = 0xffa9bed4;
   private static final int RAIN_COLOR = 0xff7ec8ff;
-  private static final int SNOW_COLOR = 0xffffffff;
-  private static final int FOG_COLOR = 0xffb9c4d6;
+  private static final int SNOW_COLOR = 0xff7ec8ff;
+  private static final int FOG_COLOR = 0xff8fa3bd;
 
   private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
   private AmbientData.WeatherIcon kind = AmbientData.WeatherIcon.CLOUD;
