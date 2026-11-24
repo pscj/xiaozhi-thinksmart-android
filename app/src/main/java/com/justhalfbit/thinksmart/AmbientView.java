@@ -454,8 +454,8 @@ final class AmbientView extends FrameLayout {
     photoLayer.addView(photoEmpty, loadingParams);
     photoShade = new View(context);
     photoShade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-        new int[] {0x00000000, 0x19000000, 0x70000000}));
-    photoLayer.addView(photoShade, new FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM));
+        new int[] {0x70000000, 0x19000000, 0x00000000}));
+    photoLayer.addView(photoShade, new FrameLayout.LayoutParams(-1, 0, Gravity.TOP));
     photoClockBlock = new LinearLayout(context);
     photoClockBlock.setOrientation(LinearLayout.VERTICAL);
     photoClockBlock.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -477,7 +477,7 @@ final class AmbientView extends FrameLayout {
     photoDate.setShadowLayer(dp(2), 0, dp(1), 0x66000000);
     photoClockBlock.addView(photoDate, new LinearLayout.LayoutParams(-2, -2));
     FrameLayout.LayoutParams clockParams =
-        new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
     photoLayer.addView(photoClockBlock, clockParams);
   }
 
@@ -491,7 +491,8 @@ final class AmbientView extends FrameLayout {
     photoClock.setTextSize(TypedValue.COMPLEX_UNIT_PX, 152 * scale * fontScale);
     photoDate.setTextSize(TypedValue.COMPLEX_UNIT_PX, 30 * scale * fontScale);
     FrameLayout.LayoutParams block = (FrameLayout.LayoutParams) photoClockBlock.getLayoutParams();
-    block.bottomMargin = Math.round(55 * scale);
+    block.topMargin = Math.round(55 * scale);
+    block.bottomMargin = 0;
     photoClockBlock.setLayoutParams(block);
     LinearLayout.LayoutParams date = (LinearLayout.LayoutParams) photoDate.getLayoutParams();
     date.topMargin = Math.round(6 * scale);
@@ -1200,6 +1201,9 @@ final class AmbientView extends FrameLayout {
       chipBg.setCornerRadius(dp(10));
       chipBg.setStroke(dp(1), 0xffebdfc6);
       chip.setBackground(chipBg);
+      // No category (the hub's hot-topics feed has none): hide the chip entirely
+      // so the title gets the width instead of an empty label (2026-11-23).
+      if (item.category.isEmpty()) chip.setVisibility(GONE);
       row.addView(chip, new LinearLayout.LayoutParams(-2, -2));
 
       LinearLayout texts = new LinearLayout(getContext());

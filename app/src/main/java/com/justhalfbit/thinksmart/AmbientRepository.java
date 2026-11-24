@@ -401,10 +401,12 @@ final class AmbientRepository {
           if (item == null) continue;
           String title = item.optString("title").trim();
           if (title.isEmpty()) continue;
+          // An empty category stays empty: the hub's hot-topics feed has no
+          // categories, and the view hides the chip for empty ones (2026-11-23).
           String category = item.optString("category").trim();
           parsed.add(
               new AmbientData.NewsItem(
-                  category.isEmpty() ? "综合" : category,
+                  category,
                   title,
                   item.optString("summary").trim()));
         }
