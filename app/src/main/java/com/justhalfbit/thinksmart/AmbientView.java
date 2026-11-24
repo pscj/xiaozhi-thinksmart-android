@@ -87,7 +87,7 @@ final class AmbientView extends FrameLayout {
   private final FrameLayout photoLayer;
   private final TextView timeText, dateText, wxCity, wxFallback, newsTag, photoClock, photoDate;
   private final LinearLayout photoClockBlock;
-  private final View photoShade;
+  private final View photoTopGradient;
   private final LinearLayout leftCol;
   private final LinearLayout wxCluster;
   private final WeatherIconView wxIcon;
@@ -452,15 +452,20 @@ final class AmbientView extends FrameLayout {
         Gravity.TOP | Gravity.CENTER_HORIZONTAL);
     loadingParams.topMargin = dp(20);
     photoLayer.addView(photoEmpty, loadingParams);
-    photoShade = new View(context);
-    photoShade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-        new int[] {0x70000000, 0x19000000, 0x00000000}));
-    photoLayer.addView(photoShade, new FrameLayout.LayoutParams(-1, 0, Gravity.TOP));
+    // Invisible top gradient (user-approved spec, 2026-11-24): rgba(0,0,0,0.35)
+    // at the top edge, 0.15 at 55%, fully transparent at the bottom of a band
+    // 35% of the screen tall, so the white clock text stays readable on bright
+    // photos without any visible frame. GradientDrawable spaces its colors
+    // evenly, so five stops approximate that piecewise-linear curve.
+    photoTopGradient = new View(context);
+    photoTopGradient.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        new int[] {0x59000000, 0x42000000, 0x2b000000, 0x15000000, 0x00000000}));
+    photoLayer.addView(photoTopGradient, new FrameLayout.LayoutParams(-1, 0, Gravity.TOP));
     photoClockBlock = new LinearLayout(context);
     photoClockBlock.setOrientation(LinearLayout.VERTICAL);
     photoClockBlock.setGravity(Gravity.CENTER_HORIZONTAL);
     photoClockBlock.setPadding(dp(20), 0, dp(20), 0);
-    photoClock = text("", 100, 0xfffafbff);
+    photoClock = text("", 100, 0xffffffff);
     photoClock.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     photoClock.setGravity(Gravity.CENTER);
     photoClock.setIncludeFontPadding(false);
@@ -469,7 +474,7 @@ final class AmbientView extends FrameLayout {
     photoClock.setFontFeatureSettings("tnum");
     photoClock.setShadowLayer(dp(3), 0, dp(1), 0x55000000);
     photoClockBlock.addView(photoClock, new LinearLayout.LayoutParams(-2, -2));
-    photoDate = text("", 20, 0xfff4f6fa);
+    photoDate = text("", 20, 0xffffffff);
     photoDate.setGravity(Gravity.CENTER);
     photoDate.setIncludeFontPadding(false);
     photoDate.setSingleLine(true);
@@ -497,9 +502,10 @@ final class AmbientView extends FrameLayout {
     LinearLayout.LayoutParams date = (LinearLayout.LayoutParams) photoDate.getLayoutParams();
     date.topMargin = Math.round(6 * scale);
     photoDate.setLayoutParams(date);
-    FrameLayout.LayoutParams shade = (FrameLayout.LayoutParams) photoShade.getLayoutParams();
-    shade.height = Math.round(height * 0.38f);
-    photoShade.setLayoutParams(shade);
+    FrameLayout.LayoutParams gradient =
+        (FrameLayout.LayoutParams) photoTopGradient.getLayoutParams();
+    gradient.height = Math.round(height * 0.35f);
+    photoTopGradient.setLayoutParams(gradient);
   }
 
   private ImageView photoImage(Context context) {
@@ -1326,7 +1332,7 @@ final class AmbientView extends FrameLayout {
     incoming.bringToFront();
     photoEmpty.setVisibility(GONE);
     clearPhotoFallback();
-    photoShade.bringToFront();
+    photoTopGradient.bringToFront();
     photoClockBlock.bringToFront();
     frontBitmap = bitmap;
     frontIsA = !frontIsA;
