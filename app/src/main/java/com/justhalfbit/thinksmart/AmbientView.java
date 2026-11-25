@@ -1217,11 +1217,18 @@ final class AmbientView extends FrameLayout {
       LinearLayout.LayoutParams textsParams = new LinearLayout.LayoutParams(0, -2, 1);
       textsParams.leftMargin = dp(12);
       row.addView(texts, textsParams);
-      // Titles live in the narrowed news column now: one line, end-ellipsis — the right
-      // edge stops at the dressing panel instead of running the full screen width.
+      // Titles live in the narrowed news column now: one line — the right edge stops
+      // at the dressing panel instead of running the full screen width. A title too
+      // wide for the line marquee-scrolls to show its tail, pauses, then rewinds and
+      // repeats (framework marquee only moves text that actually overflows, so short
+      // titles stay still). Selected state is what keeps the marquee running without
+      // focus; rows are rebuilt on every render, so it is set here for every row.
       TextView title = text(item.title, 20, 0xff40342a);
       title.setMaxLines(1);
-      title.setEllipsize(TextUtils.TruncateAt.END);
+      title.setSingleLine(true);
+      title.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+      title.setMarqueeRepeatLimit(-1);
+      title.setSelected(true);
       texts.addView(title, new LinearLayout.LayoutParams(-1, -2));
       if (!item.summary.isEmpty()) {
         TextView summary = text(item.summary, 15, 0xff7a6a58);
