@@ -1661,12 +1661,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     float brightness =
         black
             ? .01f
-            : Math.max(
-                .02f,
-                (inSleepWindowNow()
-                        ? 10
-                        : Protocol.percent(prefs.getInt("brightness", 80)))
-                    / 100f);
+            : Math.max(.02f, Protocol.percent(prefs.getInt("brightness", 80)) / 100f);
     int keepFlag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
     // A showing alarm layer holds the panel on even when the keep-screen
     // preference is off, so the full-screen alarm cannot go dark mid-ring.
@@ -1975,9 +1970,6 @@ public class MainActivity extends Activity implements VoiceService.Listener {
     LinearLayout.LayoutParams brightnessRowParams = new LinearLayout.LayoutParams(-1, -2);
     brightnessRowParams.topMargin = dp(8);
     bright.addView(brightnessRow, brightnessRowParams);
-    TextView brightNote = label("睡眠时段内屏幕将调暗；时段结束后恢复设置的亮度。", 12, 0xff7883ab);
-    brightNote.setPadding(0, dp(14), 0, 0);
-    bright.addView(brightNote);
     LinearLayout standby = settingsCard(panel, "待机显示模式",
         "空闲 1 分钟后进入所选模式；触摸屏幕或说唤醒词可返回。两种模式不会自动切换。");
     RadioGroup standbyModes = new RadioGroup(this);
@@ -2071,7 +2063,7 @@ public class MainActivity extends Activity implements VoiceService.Listener {
           for (int i = 0; i < minuteRow.getChildCount(); i++)
             minuteRow.getChildAt(i).setEnabled(checked);
         });
-    LinearLayout sleepSection = settingsCard(panel, "睡眠时段", "时段内后台任务汇报不会自动播报，屏幕调暗。叫它的话照常回答。");
+    LinearLayout sleepSection = settingsCard(panel, "睡眠时段", "时段内后台任务汇报不会自动播报。叫它的话照常回答。");
     LinearLayout sleepHeader = new LinearLayout(this);
     sleepHeader.setGravity(Gravity.CENTER_VERTICAL);
     LinearLayout sleepText = column();
