@@ -18,7 +18,6 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.text.SpannableString;
 import android.text.Spanned;
-import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.util.TypedValue;
@@ -143,6 +142,31 @@ final class AmbientView extends FrameLayout {
         }
       };
 
+  /**
+   * The one driver behind the news titles' synchronized scroll (see
+   * NewsScrollClock): every tick derives each row's offset from the same
+   * elapsed reading, so the rows start together, travel at one speed and
+   * rewind together. It only runs while the info screen is showing and
+   * some title actually overflows; renderNews re-arms it for every new row
+   * set, hide() drops it.
+   */
+  private final Runnable newsScrollTick =
+      new Runnable() {
+        public void run() {
+          if (!isShowing() || mode != Mode.INFO || newsScrollMaxOverflowPx <= 0) return;
+          int shared =
+              NewsScrollClock.sharedOffsetPx(
+                  SystemClock.uptimeMillis() - newsScrollAnchorMs,
+                  newsScrollMaxOverflowPx,
+                  dp(NEWS_SCROLL_SPEED_DP));
+          for (NewsTitleView title : newsTitleViews) {
+            title.setScrollOffsetPx(
+                NewsScrollClock.rowOffsetPx(shared, title.overflowPx()));
+          }
+          ui.postDelayed(this, NEWS_SCROLL_TICK_MS);
+        }
+      };
+
   private AmbientRepository repo;
   private File photosDir;
   private Supplier<String> wakePhrase;
@@ -162,6 +186,12 @@ final class AmbientView extends FrameLayout {
   private LocalDate dressDate;
   /** The last news feed rendered; re-rendered when the news list's height changes. */
   private AmbientData.NewsFeed lastNewsFeed;
+  /** Title views of the currently rendered news rows, in row order; rebuilt by renderNews. */
+  private final List<NewsTitleView> newsTitleViews = new ArrayList<>();
+  /** Largest title overflow (px) among the current rows; 0 = nothing needs to scroll. */
+  private int newsScrollMaxOverflowPx;
+  /** Monotonic anchor (uptimeMillis) of the current news scroll cycle. */
+  private long newsScrollAnchorMs;
   private boolean frontIsA = true;
   private Bitmap frontBitmap;
   private int shiftStep;
@@ -595,6 +625,7 @@ final class AmbientView extends FrameLayout {
     ui.removeCallbacks(shiftTick);
     ui.removeCallbacks(photoTick);
     ui.removeCallbacks(bgTick);
+    stopNewsScroll();
     finishPhotoTransition();
     bgA.animate().cancel();
     bgB.animate().cancel();
@@ -1163,6 +1194,77 @@ final class AmbientView extends FrameLayout {
   }
 
   /**
+   * One news headline, drawn directly so the whole list can scroll on the
+   * single shared NewsScrollClock timeline instead of the framework
+   * marquee's per-row schedule. The text is measured once at full width;
+   * the view clips it to its own bounds, and the driver shifts it left by
+   * the shared offset, clamped per row by {@link NewsScrollClock#rowOffsetPx}
+   * — so a short title parks at its tail while the group travels on, and a
+   * title that fits never moves. Height follows the same font-metrics line
+   * a plain TextView would reserve, so the fixed-pitch rows are unchanged.
+   */
+  private static final class NewsTitleView extends View {
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private String titleText = "";
+    private int textWidthPx;
+    private int lineHeightPx = 1;
+    private int baselinePx;
+    private int scrollOffsetPx;
+
+    NewsTitleView(Context context) {
+      super(context);
+    }
+
+    void setTitle(String value, float sizePx, int color) {
+      titleText = value == null ? "" : value;
+      paint.setTextSize(sizePx);
+      paint.setColor(color);
+      Paint.FontMetricsInt fm = paint.getFontMetricsInt();
+      lineHeightPx = Math.max(1, fm.bottom - fm.top);
+      baselinePx = -fm.top;
+      textWidthPx = Math.round(paint.measureText(titleText));
+      scrollOffsetPx = 0;
+      requestLayout();
+      invalidate();
+    }
+
+    /** How far (px) the text sticks out past this view's right edge; 0 when it fits. */
+    int overflowPx() {
+      return Math.max(0, textWidthPx - getWidth());
+    }
+
+    void setScrollOffsetPx(int offsetPx) {
+      if (scrollOffsetPx == offsetPx) return;
+      scrollOffsetPx = offsetPx;
+      invalidate();
+    }
+
+    @Override
+    protected void onMeasure(int widthSpec, int heightSpec) {
+      int width =
+          MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED
+              ? textWidthPx
+              : MeasureSpec.getSize(widthSpec);
+      int height = lineHeightPx;
+      if (MeasureSpec.getMode(heightSpec) == MeasureSpec.AT_MOST) {
+        height = Math.min(height, MeasureSpec.getSize(heightSpec));
+      } else if (MeasureSpec.getMode(heightSpec) == MeasureSpec.EXACTLY) {
+        height = MeasureSpec.getSize(heightSpec);
+      }
+      setMeasuredDimension(Math.max(1, width), Math.max(1, height));
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+      if (titleText.isEmpty()) return;
+      canvas.save();
+      canvas.clipRect(0, 0, getWidth(), getHeight());
+      canvas.drawText(titleText, -scrollOffsetPx, baselinePx, paint);
+      canvas.restore();
+    }
+  }
+
+  /**
    * How many news rows to show. Title-only rows have an exact height (row + gap), so
    * the count is whatever the news list's measured height holds, capped at the feed
    * layer's item cap; before the first layout the historical four stand in and the
@@ -1180,8 +1282,37 @@ final class AmbientView extends FrameLayout {
     return Math.min(MAX_NEWS_ROWS, fit);
   }
 
+  /**
+   * Drops the news scroll driver. The title views it was driving are about
+   * to be rebuilt (or the screen is going away); a fresh render re-arms it
+   * through startNewsScroll, so drivers never stack.
+   */
+  private void stopNewsScroll() {
+    ui.removeCallbacks(newsScrollTick);
+    newsScrollMaxOverflowPx = 0;
+  }
+
+  /**
+   * (Re)starts the shared news-title scroll for the rows renderNews just
+   * built. Posted onto the news list by renderNews, so it runs after the
+   * layout pass that adding the rows queued — the title widths measured
+   * here are real, not the pre-layout zeros.
+   */
+  private void startNewsScroll() {
+    stopNewsScroll();
+    if (!isShowing() || mode != Mode.INFO) return;
+    for (NewsTitleView title : newsTitleViews) {
+      newsScrollMaxOverflowPx = Math.max(newsScrollMaxOverflowPx, title.overflowPx());
+    }
+    if (newsScrollMaxOverflowPx <= 0) return;
+    newsScrollAnchorMs = SystemClock.uptimeMillis();
+    ui.post(newsScrollTick);
+  }
+
   private void renderNews(AmbientData.NewsFeed feed) {
     lastNewsFeed = feed;
+    stopNewsScroll();
+    newsTitleViews.clear();
     newsTag.setVisibility(feed.fromHub ? GONE : VISIBLE);
     newsList.removeAllViews();
     int limit = newsRowLimit(feed);
@@ -1219,23 +1350,24 @@ final class AmbientView extends FrameLayout {
       row.addView(texts, textsParams);
       // Titles live in the narrowed news column now: one line — the right edge stops
       // at the dressing panel instead of running the full screen width. A title too
-      // wide for the line marquee-scrolls to show its tail, pauses, then rewinds and
-      // repeats (framework marquee only moves text that actually overflows, so short
-      // titles stay still). Selected state is what keeps the marquee running without
-      // focus; rows are rebuilt on every render, so it is set here for every row.
-      TextView title = text(item.title, 20, 0xff40342a);
-      title.setMaxLines(1);
-      title.setSingleLine(true);
-      title.setEllipsize(TextUtils.TruncateAt.MARQUEE);
-      title.setMarqueeRepeatLimit(-1);
-      title.setSelected(true);
+      // wide for the line scrolls to show its tail, but not on the framework
+      // marquee: that ran every row on its own schedule, so rows drifted apart.
+      // Instead the title is drawn by NewsTitleView and all rows follow the one
+      // shared NewsScrollClock timeline — start together, one speed, short rows
+      // park at their tail until the longest finishes, then all rewind together.
+      NewsTitleView title = new NewsTitleView(getContext());
+      title.setTitle(item.title, sp(20), 0xff40342a);
       texts.addView(title, new LinearLayout.LayoutParams(-1, -2));
+      newsTitleViews.add(title);
       if (!item.summary.isEmpty()) {
         TextView summary = text(item.summary, 15, 0xff7a6a58);
         summary.setMaxLines(2);
         texts.addView(summary, new LinearLayout.LayoutParams(-1, -2));
       }
     }
+    // Arm the synchronized scroll once this row set is laid out (posted:
+    // the layout pass queued by adding the rows runs first).
+    newsList.post(this::startNewsScroll);
   }
 
   // ---- photo frame ----
@@ -1510,6 +1642,16 @@ final class AmbientView extends FrameLayout {
 
   /** Vertical gap above each news row (dp): the row pitch is height + gap. */
   private static final int NEWS_ROW_GAP_DP = 8;
+
+  /**
+   * Shared speed of the synchronized news-title scroll (dp per second):
+   * in the framework marquee's neighbourhood but a touch slower, so a
+   * headline stays readable while it travels.
+   */
+  private static final int NEWS_SCROLL_SPEED_DP = 42;
+
+  /** News scroll driver cadence (ms): 25 ticks a second is smooth at this speed. */
+  private static final long NEWS_SCROLL_TICK_MS = 40;
 
   /** Dressing panel exact title and tier-row heights (dp); see the budget note above. */
   private static final int DRESS_TITLE_H_DP = 28;
